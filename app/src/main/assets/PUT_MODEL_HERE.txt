@@ -1,0 +1,15 @@
+Place movenet_lightning.tflite in this directory.
+
+Download (INT8, recommended for NPU):
+  https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4
+
+The file must be named exactly:
+  movenet_lightning.tflite
+
+Without this file the app runs in demo mode (MockPoseEstimator) with
+an animated skeleton. The live screen will show "MOCK MODEL" instead
+of "LITERT · NPU".
+
+To verify NPU is active after adding the model, filter Logcat for:
+  Tag: FitForm/LiteRT
+  Look for: "NNAPI delegate created" and per-frame latency logs

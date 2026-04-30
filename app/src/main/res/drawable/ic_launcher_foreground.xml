@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- "FF" mark in a heavy condensed style for the launcher -->
+    <path
+        android:pathData="M30,30 L48,30 L48,38 L38,38 L38,48 L46,48 L46,56 L38,56 L38,78 L30,78 Z"
+        android:fillColor="#D4FF3A" />
+    <path
+        android:pathData="M58,30 L76,30 L76,38 L66,38 L66,48 L74,48 L74,56 L66,56 L66,78 L58,78 Z"
+        android:fillColor="#F5F4F0" />
+    <!-- accent bar -->
+    <path
+        android:pathData="M30,82 L78,82 L78,84 L30,84 Z"
+        android:fillColor="#D4FF3A" />
+</vector>

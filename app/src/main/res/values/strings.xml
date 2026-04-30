@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FitForm</string>
+    <string name="tagline">TRAIN SMARTER WITH ON-DEVICE AI COACHING.</string>
+    <string name="privacy_blurb">Real-time feedback. No cloud processing. Your videos stay on your phone.</string>
+</resources>

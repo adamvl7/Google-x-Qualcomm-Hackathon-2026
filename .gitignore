@@ -1,0 +1,14 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+*.jks
+*.keystore
+
+# Keep the gradle wrapper jar committed so the project builds without Gradle installed
+!gradle/wrapper/gradle-wrapper.jar
