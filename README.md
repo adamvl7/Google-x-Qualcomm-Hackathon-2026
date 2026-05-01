@@ -40,53 +40,32 @@ The camera runs MoveNet Lightning through the Hexagon NPU at ~30 fps, giving per
 ## System Architecture
 
 ```mermaid
-flowchart TB
-    User["Athlete / User"]
+flowchart LR
+    User["Athlete"]
 
-    subgraph AndroidApp["FitForm Android App"]
-        Camera["CameraX\nPreview + ImageAnalysis + VideoCapture"]
-        Pose["LiteRT PoseEstimator\nMoveNet Lightning"]
-        FormCls["FormClassifier\nINT8 dense network"]
-        Feedback["FeedbackEngine\nSquatAnalyzer / ShotAnalyzer"]
-        ViewModel["LiveCoachViewModel\nStateFlow"]
-        UI["Compose UI\nPoseOverlay + ScoreBadge + CueBanner"]
-        Recorder["SessionRecorder\nvideo.mp4 + analysis.json"]
-        SetSummary["SetSummaryScreen"]
-        Gemma["GemmaCoach\nGemma 3 1B IT (LlmInference)"]
+    subgraph App["FitForm Android App"]
+        Camera["CameraX\nPreview + Analysis"]
+        Pose["MoveNet Lightning\n(LiteRT)"]
+        Engine["FeedbackEngine\n+ FormClassifier"]
+        UI["Compose UI\nScore · Cue · Overlay"]
+        Summary["SessionRecorder\n→ Set Summary"]
+        Gemma["GemmaCoach\nGemma 3 1B IT"]
+        Tip["AI Coaching Tip"]
     end
 
-    subgraph Hardware["Samsung Galaxy S25 Ultra"]
+    subgraph HW["Samsung Galaxy S25 Ultra"]
         NNAPI["NNAPI Delegate"]
-        NPU["Snapdragon Hexagon NPU"]
-        CPU["CPU Fallback\n4 Threads"]
+        NPU["Hexagon NPU"]
+        CPU["CPU Fallback\n4 threads"]
     end
 
-    subgraph Outputs["User Feedback"]
-        Score["Form Score 0–100"]
-        Cue["Real-Time Coaching Cue"]
-        Tip["AI Coaching Tip\n(Post-Set)"]
-    end
+    User --> Camera --> Pose --> Engine --> UI
+    UI -->|"during set"| Summary
+    Summary -->|"after set"| Gemma --> Tip
 
-    User --> Camera
-    Camera -->|"RGBA frames\nkeep latest"| Pose
-    Pose --> NNAPI
-    FormCls --> NNAPI
-    Gemma --> NNAPI
+    Pose & Engine & Gemma --> NNAPI
     NNAPI --> NPU
     NNAPI -. fallback .-> CPU
-
-    Pose -->|"17 keypoints"| Feedback
-    Feedback -->|"geometry features"| FormCls
-    FormCls -->|"calibrated score"| ViewModel
-    Feedback -->|"cue + severity"| ViewModel
-    ViewModel --> UI
-    UI --> Score
-    UI --> Cue
-
-    UI -->|"during set"| Recorder
-    Recorder -->|"after set"| SetSummary
-    SetSummary --> Gemma
-    Gemma --> Tip
 ```
 
 **No cloud. No login. No backend.** All inference and storage runs on-device.
