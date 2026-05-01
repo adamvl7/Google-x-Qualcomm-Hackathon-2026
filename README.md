@@ -43,6 +43,8 @@ LiveCoachViewModel (StateFlow)
 Compose UI: PoseOverlay + ScoreBadge + CueBanner
     ↓  (when set is active)
 SessionRecorder → analysis.json + video.mp4
+    ↓  (after set ends)
+SetSummaryScreen → GemmaCoach (LlmInference) → AI coaching tip
 ```
 
 **No cloud. No login. No backend.** All inference and storage runs on-device.
