@@ -37,22 +37,56 @@ The camera runs MoveNet Lightning through the Hexagon NPU at ~30 fps, giving per
 
 ---
 
-## Architecture
+## System Architecture
 
-```
-CameraX (Preview + ImageAnalysis + VideoCapture)
-    ↓  RGBA_8888 frames, STRATEGY_KEEP_ONLY_LATEST
-LiteRtPoseEstimator  ──  NNAPI Delegate → Hexagon NPU
-    ↓  17 COCO keypoints, normalized [0,1], ~5–8 ms/frame
-FeedbackEngine (SquatAnalyzer | ShotAnalyzer)
-    ↓  form score 0–100 + coaching cue + severity
-LiveCoachViewModel (StateFlow)
-    ↓
-Compose UI: PoseOverlay + ScoreBadge + CueBanner
-    ↓  (when set is active)
-SessionRecorder → analysis.json + video.mp4
-    ↓  (after set ends)
-SetSummaryScreen → GemmaCoach (LlmInference) → AI coaching tip
+```mermaid
+flowchart TB
+    User["Athlete / User"]
+
+    subgraph AndroidApp["FitForm Android App"]
+        Camera["CameraX\nPreview + ImageAnalysis + VideoCapture"]
+        Pose["LiteRT PoseEstimator\nMoveNet Lightning"]
+        FormCls["FormClassifier\nINT8 dense network"]
+        Feedback["FeedbackEngine\nSquatAnalyzer / ShotAnalyzer"]
+        ViewModel["LiveCoachViewModel\nStateFlow"]
+        UI["Compose UI\nPoseOverlay + ScoreBadge + CueBanner"]
+        Recorder["SessionRecorder\nvideo.mp4 + analysis.json"]
+        SetSummary["SetSummaryScreen"]
+        Gemma["GemmaCoach\nGemma 3 1B IT (LlmInference)"]
+    end
+
+    subgraph Hardware["Samsung Galaxy S25 Ultra"]
+        NNAPI["NNAPI Delegate"]
+        NPU["Snapdragon Hexagon NPU"]
+        CPU["CPU Fallback\n4 Threads"]
+    end
+
+    subgraph Outputs["User Feedback"]
+        Score["Form Score 0–100"]
+        Cue["Real-Time Coaching Cue"]
+        Tip["AI Coaching Tip\n(Post-Set)"]
+    end
+
+    User --> Camera
+    Camera -->|"RGBA frames\nkeep latest"| Pose
+    Pose --> NNAPI
+    FormCls --> NNAPI
+    Gemma --> NNAPI
+    NNAPI --> NPU
+    NNAPI -. fallback .-> CPU
+
+    Pose -->|"17 keypoints"| Feedback
+    Feedback -->|"geometry features"| FormCls
+    FormCls -->|"calibrated score"| ViewModel
+    Feedback -->|"cue + severity"| ViewModel
+    ViewModel --> UI
+    UI --> Score
+    UI --> Cue
+
+    UI -->|"during set"| Recorder
+    Recorder -->|"after set"| SetSummary
+    SetSummary --> Gemma
+    Gemma --> Tip
 ```
 
 **No cloud. No login. No backend.** All inference and storage runs on-device.
@@ -83,6 +117,36 @@ NnApiDelegate()  →  Hexagon NPU   (ideal: Snapdragon devices)
 CPU, numThreads=4                 (any Android device)
       ↓ .tflite missing
 MockPoseEstimator                 (demo mode, animated skeleton)
+```
+
+### LiteRT Acceleration Flow
+
+```mermaid
+flowchart LR
+    Frame["Camera Frame"]
+    Preprocess["Preprocess\nResize + Normalize"]
+    MoveNet["MoveNet Lightning\nINT8 TFLite"]
+    LiteRT["LiteRT Interpreter"]
+    NNAPI["NNAPI Delegate"]
+    Hexagon["Qualcomm Hexagon NPU"]
+    CPU["CPU Fallback"]
+    Keypoints["17 Pose Keypoints"]
+    Analyzer["Form Analyzer\nSquat / Shot Logic"]
+    FormCls["FormClassifier\nINT8 dense (LiteRT/NPU)"]
+    Feedback["Live Feedback\nScore + Coaching Cue"]
+
+    Frame --> Preprocess
+    Preprocess --> MoveNet
+    MoveNet --> LiteRT
+    LiteRT --> NNAPI
+    NNAPI --> Hexagon
+    LiteRT -. fallback .-> CPU
+    Hexagon --> Keypoints
+    CPU -. fallback .-> Keypoints
+    Keypoints --> Analyzer
+    Analyzer --> FormCls
+    FormCls --> Feedback
+    Analyzer --> Feedback
 ```
 
 ---
@@ -225,21 +289,13 @@ git clone https://github.com/your-username/fitform.git
 
 Open `FitForm/` in Android Studio. Gradle sync completes automatically.
 
-### 2. Add the Pose Model (Required)
+### 2. Pose Model — Bundled, No Download Needed
 
-Download **MoveNet Lightning INT8**:
+The MoveNet Lightning INT8 model (~2.9 MB) is **already committed to the repo at `app/src/main/assets/movenet_lightning.tflite`** and packaged inside the APK at build time. Cloning the repo or installing the APK is all that's required — no separate download or manual placement step.
 
-```
-https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4
-```
-
-Place it at:
-
-```
-FitForm/app/src/main/assets/movenet_lightning.tflite
-```
-
-> Without the model, FitForm runs in demo mode with `MockPoseEstimator` — an animated skeleton. The full UI works; the live screen shows "MOCK MODEL" in grey.
+> **Swapping in a different variant?** Drop a replacement `.tflite` at `app/src/main/assets/movenet_lightning.tflite` (path is hard-coded in `LiteRtPoseEstimator`). Reference download from Google Research: [tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4](https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4).
+>
+> **If the asset is ever missing**, FitForm falls back to `MockPoseEstimator` — an animated skeleton. The full UI works; the live screen shows "MOCK MODEL" in grey.
 
 ### 3. Add the Gemma Model (Optional — enables AI coaching tips)
 
