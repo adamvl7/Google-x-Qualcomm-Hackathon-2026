@@ -193,6 +193,38 @@ FitForm/LiteRT  [NPU/NNAPI] frame=60  last=5ms  avg=6ms
 
 ---
 
+## Problems We Faced
+
+> **Rubric alignment:** Technological Implementation — engineering judgment under real hardware constraints.
+
+The interesting parts of building FitForm weren't the happy paths. Six concrete obstacles shaped the architecture you see in the rest of this README:
+
+### 1. Picking the right pose model
+
+We evaluated several pose estimators (Mediapipe BlazePose, MoveNet Thunder, MoveNet Lightning) against two non-negotiable constraints: sustain 30fps on Snapdragon and expose enough joints for both squat and shot biomechanics. Thunder was more accurate but missed the latency budget on edge cases. **Lightning + INT8** hit ~5–8ms per frame on the Hexagon NPU and surfaced all 17 COCO keypoints we needed — accuracy we could afford, latency we couldn't compromise.
+
+### 2. Tuning thresholds, not model weights
+
+"Fine-tuning" here means the biomechanics thresholds inside [`SquatAnalyzer`](app/src/main/java/com/fitform/app/analysis/squat/SquatAnalyzer.kt) and [`ShotAnalyzer`](app/src/main/java/com/fitform/app/analysis/shot/ShotAnalyzer.kt) — not gradient descent on the model itself. Squat depth (>110°), forward knee travel (>0.10 normalized), trunk lean (>45°), elbow alignment (>0.08), follow-through (<140°): every threshold was iterated against real squat and shot videos until the cues fired when form actually broke and stayed silent when it didn't. The difference between "the model sees the joints" and "the coaching feels right" lives entirely in this table.
+
+### 3. Routing inference to Hexagon, not silently to CPU
+
+Adding `addDelegate(NnApiDelegate())` is one line; making sure it actually lands on the Hexagon NPU instead of silently falling back to CPU took device-specific debugging. INT8 quantization had to match what the NNAPI driver accepts, the fallback chain (NPU → CPU → MockPoseEstimator) had to be wired so no path crashes the app, and we had to log the active backend so we could *prove* the route at runtime — `adb logcat -s FitForm/LiteRT` will show `backend=NNAPI/NPU` or the fallback in plain text.
+
+### 4. Cold-start latency hiding the real performance
+
+The first inference on a fresh NNAPI interpreter triggers NPU model compilation and produces a 100–150ms spike on the first live frame. Without warmup, the first second of the camera feed lags visibly and any benchmark we showed judges would lie about steady-state performance. We pre-run **one dummy inference during interpreter construction** so the NPU execution plan is cached before the camera even starts — Logcat reports `warmup complete: ~110ms (NPU execution plan cached)` and live frames hit `~6–7ms` immediately afterwards.
+
+### 5. Frame backpressure at 30fps
+
+CameraX delivers frames faster than inference can consume them on slower fallback paths. Without intervention, frames queue, latency compounds, and the skeleton lags behind the athlete. Combining CameraX's `STRATEGY_KEEP_ONLY_LATEST` with a coroutine `Mutex` ensures only one frame is in-flight at any time, and any frames that arrive during inference are dropped rather than buffered. The UI is *always* showing the athlete's current pose, never one from 200ms ago.
+
+### 6. Honesty about hardware that isn't there
+
+Two related problems, one principle: never present made-up numbers as real. The `litert-gpu` native libraries aren't shipped with every Android build, so we load the GPU delegate via reflection — its absence degrades to CPU instead of crashing the benchmark. Separately, the Performance Lab uses [`DeviceInfo.isProbablyEmulator()`](app/src/main/java/com/fitform/app/util/DeviceInfo.kt) to detect emulator runs and visibly mark the Hexagon NPU bar as "Unavailable on emulator" rather than letting `BackendResult` numbers from a virtual device read like a Snapdragon benchmark. The **Run Benchmark Again** button on a real S25 Ultra is what proves the real numbers — judges can tap it live.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
