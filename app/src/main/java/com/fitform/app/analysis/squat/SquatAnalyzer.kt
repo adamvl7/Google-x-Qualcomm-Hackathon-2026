@@ -30,9 +30,9 @@ import kotlin.math.abs
  *   • directly detectable from the keypoint x-coordinates in side view
  *
  * ── Cue priority (highest → lowest) ─────────────────────────────────────────
- *   1. Low keypoint confidence     → "Step back / improve lighting"
+ *   1. Low keypoint confidence       → "Step back / improve lighting"
  *   2. Excessive forward knee travel → "Watch knee tracking"
- *   3. Excessive trunk forward lean  → "Chest up"
+ *   3. Back/shin angle mismatch      → "Chest up" or "Sit back"
  *   4. Insufficient squat depth      → "Go deeper"
  *   5. Lateral hip imbalance         → "Stay balanced"
  *   6. All checks pass               → "Good rep"
@@ -42,6 +42,13 @@ import kotlin.math.abs
  * Borderline tracking confidence deducts a further 15 pts.
  */
 class SquatAnalyzer {
+
+    // Per-check consecutive frame counters — an issue only counts once it has
+    // been detected for CONFIRM_FRAMES frames in a row. Resets on each good frame.
+    private var kneeFrames    = 0
+    private var postureFrames = 0
+    private var depthFrames   = 0
+    private var balanceFrames = 0
 
     fun analyze(pose: PoseResult): AnalysisResult {
         // Guard: reject frames where overall pose confidence is too low to trust.
@@ -82,10 +89,9 @@ class SquatAnalyzer {
         }
 
         // ── Standing detection ────────────────────────────────────────────────
-        // If the knee is nearly straight the person is standing at rest.
-        // Show a neutral ready-state cue rather than form feedback.
         val standingKneeAngle = GeometryUtils.angleBetweenThreePoints(hip, knee, ankle)
         if (standingKneeAngle > STANDING_KNEE_ANGLE) {
+            kneeFrames = 0; postureFrames = 0; depthFrames = 0; balanceFrames = 0
             return AnalysisResult(
                 score = 100,
                 cue = "Standing — begin your squat",
@@ -99,62 +105,62 @@ class SquatAnalyzer {
         val cues = mutableListOf<Pair<String, Severity>>()
 
         // ── Check 1: Forward knee travel ─────────────────────────────────────
-        // Threshold: 0.10 in normalized [0,1] frame width ≈ 5–8 cm at typical
-        // filming distance (~1.5 m). At this distance the full body fills ~60%
-        // of frame height; 10% of width corresponds to roughly one shoe-length
-        // of forward drift, which coaches commonly cite as the correction boundary.
         val kneeForward = GeometryUtils.horizontalOffset(ankle, knee)
         if (abs(kneeForward) > KNEE_TRAVEL_LIMIT) {
-            score -= SCORE_KNEE_TRAVEL
-            cues += "Watch knee tracking" to Severity.YELLOW
+            kneeFrames++
+            if (kneeFrames >= CONFIRM_FRAMES) {
+                score -= SCORE_KNEE_TRAVEL
+                cues += "Watch knee tracking" to Severity.YELLOW
+            }
+        } else {
+            kneeFrames = 0
         }
 
-        // ── Check 2: Trunk / back angle from vertical ─────────────────────────
-        // We measure the angle between the shoulder→hip segment and a true
-        // vertical line. 0° = perfectly upright, 90° = fully horizontal.
-        // >45° from vertical indicates the torso is leaning too far forward,
-        // overloading the lower back and reducing quad engagement. The 45°
-        // limit matches the upper bound cited in most strength-coaching literature
-        // for high-bar back squat; low-bar squats allow slightly more lean but
-        // the same cue applies.
-        val trunkAngle = trunkLeanDegrees(shoulder, hip)
-        if (trunkAngle > BACK_LEAN_LIMIT) {
-            score -= SCORE_BACK_LEAN
-            cues += "Chest up" to Severity.YELLOW
+        // ── Check 2: Back vs shin parallel ────────────────────────────────────
+        val trunkAngle = leanFromVerticalDegrees(shoulder, hip)
+        val shinAngle  = leanFromVerticalDegrees(knee, ankle)
+        val postureDiff = trunkAngle - shinAngle
+        if (abs(postureDiff) > POSTURE_DIFF_LIMIT) {
+            postureFrames++
+            if (postureFrames >= CONFIRM_FRAMES) {
+                score -= SCORE_BACK_LEAN
+                cues += if (postureDiff > 0) "Chest up" to Severity.YELLOW
+                        else "Sit back" to Severity.YELLOW
+            }
+        } else {
+            postureFrames = 0
         }
 
         // ── Check 3: Squat depth ──────────────────────────────────────────────
-        // The hip→knee→ankle angle at the knee joint:
-        //   • 90°  = thighs parallel to the floor (competition parallel squat)
-        //   • 110° = just above parallel — the most common "didn't go deep enough" cut-off
-        //   • 180° = standing straight
-        // We only apply this check when the hip is clearly lower than the
-        // shoulder (hip.y > shoulder.y + 0.25 in image coords where y increases
-        // downward) to avoid flagging the check while the athlete is still
-        // standing and approaching the bottom of the rep.
+        // 110° threshold: thighs at or just above parallel — practical for
+        // non-competition athletes. 90° (full parallel) is too strict for casual use.
         val kneeAngle = GeometryUtils.angleBetweenThreePoints(hip, knee, ankle)
-        val descending = (hip.y - shoulder.y) > 0.25f
-        if (descending && kneeAngle > DEPTH_KNEE_ANGLE_LIMIT) {
-            score -= SCORE_DEPTH
-            cues += "Go deeper" to Severity.YELLOW
+        if (kneeAngle > DEPTH_KNEE_ANGLE_LIMIT) {
+            depthFrames++
+            if (depthFrames >= CONFIRM_FRAMES) {
+                score -= SCORE_DEPTH
+                cues += "Too shallow" to Severity.YELLOW
+            }
+        } else {
+            depthFrames = 0
         }
 
         // ── Check 4: Lateral hip balance ──────────────────────────────────────
-        // Compare left and right hip y-coordinates. A tilt > 0.05 (5% of frame
-        // height ≈ 3–4 cm at typical distance) indicates the athlete is leaning
-        // or favouring one side — common when one hip flexor is tighter or
-        // one leg is doing more work. The same threshold is used for landing
-        // balance in ShotAnalyzer to maintain consistency across modes.
         val leftHip  = pose[KeypointIndex.LEFT_HIP]
         val rightHip = pose[KeypointIndex.RIGHT_HIP]
         val balanceOffset = GeometryUtils.absVerticalOffset(leftHip, rightHip)
         if (balanceOffset > BALANCE_LIMIT) {
-            score -= SCORE_BALANCE
-            cues += "Stay balanced" to Severity.YELLOW
+            balanceFrames++
+            if (balanceFrames >= CONFIRM_FRAMES) {
+                score -= SCORE_BALANCE
+                cues += "Stay balanced" to Severity.YELLOW
+            }
+        } else {
+            balanceFrames = 0
         }
 
-        // Mild deduction when tracking confidence is borderline (0.40–0.55).
-        // Score is still displayed but with a 15-pt penalty to reflect uncertainty.
+        // Small deduction for borderline confidence — reduced from 15 to 8
+        // so real-world lighting doesn't tank scores on otherwise good reps.
         if (coreConfidence < 0.55f) score -= SCORE_LOW_CONF
 
         score = score.coerceIn(0, 100)
@@ -179,19 +185,18 @@ class SquatAnalyzer {
     }
 
     /**
-     * Returns the angle (degrees) between the shoulder→hip segment and a
-     * true vertical line. 0° = upright spine, 90° = horizontal torso.
+     * Returns the angle (degrees) between the segment [top]→[bottom] and a
+     * true vertical line. 0° = perfectly vertical, 90° = horizontal.
      *
-     * Implementation: atan(Δx / Δy). When the shoulder is directly above
-     * the hip Δx ≈ 0 so the angle approaches 0°. The coerceAtLeast guard
-     * prevents division by zero on perfectly vertical poses.
+     * Used for both the torso (shoulder→hip) and the shin (knee→ankle) so the
+     * two lean values can be directly compared.
      */
-    private fun trunkLeanDegrees(
-        shoulder: com.fitform.app.model.Keypoint,
-        hip: com.fitform.app.model.Keypoint,
+    private fun leanFromVerticalDegrees(
+        top: com.fitform.app.model.Keypoint,
+        bottom: com.fitform.app.model.Keypoint,
     ): Float {
-        val dx = abs(shoulder.x - hip.x)
-        val dy = abs(shoulder.y - hip.y).coerceAtLeast(0.0001f)
+        val dx = abs(top.x - bottom.x)
+        val dy = abs(top.y - bottom.y).coerceAtLeast(0.0001f)
         return Math.toDegrees(kotlin.math.atan2(dx, dy).toDouble()).toFloat()
     }
 
@@ -200,29 +205,19 @@ class SquatAnalyzer {
         // coordinates: normalized [0, 1] where 1 = full frame dimension.
         // Angles are in degrees.
 
-        /** Knee angle above which the person is considered standing at rest. */
+        /** Frames a check must fire consecutively before it counts against the score. */
+        private const val CONFIRM_FRAMES = 6  // ~200ms at 30fps
+
         private const val STANDING_KNEE_ANGLE = 155f
+        private const val KNEE_TRAVEL_LIMIT   = 0.13f  // slightly more forgiving
+        private const val POSTURE_DIFF_LIMIT  = 25f    // wider band — pose noise can eat 15°
+        private const val DEPTH_KNEE_ANGLE_LIMIT = 110f // just-above-parallel is good enough
+        private const val BALANCE_LIMIT       = 0.07f  // side-view balance is noisy
 
-        /** Knee x must not exceed ankle x by more than this (normalized width). */
-        private const val KNEE_TRAVEL_LIMIT = 0.10f
-
-        /** Trunk forward lean limit in degrees from vertical. */
-        private const val BACK_LEAN_LIMIT = 45f
-
-        /**
-         * Knee angle (hip→knee→ankle) above which squat depth is insufficient.
-         * 110° ≈ just above parallel; below this is a passing rep.
-         */
-        private const val DEPTH_KNEE_ANGLE_LIMIT = 110f
-
-        /** Max left/right hip y-offset before triggering the balance cue. */
-        private const val BALANCE_LIMIT = 0.05f
-
-        // Score deductions per failed check.
-        private const val SCORE_KNEE_TRAVEL = 25
-        private const val SCORE_BACK_LEAN   = 20
-        private const val SCORE_DEPTH       = 25
-        private const val SCORE_BALANCE     = 15
-        private const val SCORE_LOW_CONF    = 15
+        private const val SCORE_KNEE_TRAVEL = 20
+        private const val SCORE_BACK_LEAN   = 15
+        private const val SCORE_DEPTH       = 20
+        private const val SCORE_BALANCE     = 10
+        private const val SCORE_LOW_CONF    = 8
     }
 }

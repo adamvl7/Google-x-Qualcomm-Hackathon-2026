@@ -48,6 +48,11 @@ class SessionStorage(private val context: Context) {
         analysisFile(session).writeText(json.encodeToString(summary))
     }
 
+    fun saveAnalysis(sessionId: String, summary: SessionSummary) {
+        val dir = File(rootDir, sessionId).apply { mkdirs() }
+        File(dir, "analysis.json").writeText(json.encodeToString(summary))
+    }
+
     fun loadAnalysis(sessionId: String): SessionSummary? {
         val file = File(File(rootDir, sessionId), "analysis.json")
         if (!file.exists()) return null

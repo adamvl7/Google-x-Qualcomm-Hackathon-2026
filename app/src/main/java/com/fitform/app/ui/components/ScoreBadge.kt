@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.fitform.app.model.Severity
 import com.fitform.app.ui.theme.FitFormColors
 import com.fitform.app.ui.theme.FitFormType
 
@@ -31,6 +32,7 @@ import com.fitform.app.ui.theme.FitFormType
 @Composable
 fun ScoreBadge(
     score: Int,
+    severity: Severity,
     paused: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -43,7 +45,9 @@ fun ScoreBadge(
         ),
         label = "scoreCounter",
     )
-    val color = scoreColor(animated, paused)
+    // Color the score using the same severity that drives the cue banner so
+    // the two elements always agree (no green badge with a yellow cue).
+    val color = scoreColor(severity, paused)
     val ring by animateColorAsState(targetValue = color, animationSpec = tween(220), label = "ring")
 
     Column(
@@ -84,9 +88,22 @@ fun ScoreBadge(
     }
 }
 
+fun scoreColor(severity: Severity, paused: Boolean = false): Color = when {
+    paused -> FitFormColors.Mute
+    severity == Severity.GREEN -> FitFormColors.StatusGreen
+    severity == Severity.YELLOW -> FitFormColors.StatusAmber
+    else -> FitFormColors.StatusRed
+}
+
+/**
+ * Score-based color for historical/static contexts (history list, summary
+ * cards, replay rep markers) where no live cue severity is available.
+ * Thresholds are aligned with the live analyzer: a single failed check
+ * deducts ~15-25 pts and the analyzer escalates to RED below 70.
+ */
 fun scoreColor(score: Int, paused: Boolean = false): Color = when {
     paused -> FitFormColors.Mute
-    score >= 90 -> FitFormColors.StatusGreen
+    score >= 85 -> FitFormColors.StatusGreen
     score >= 70 -> FitFormColors.StatusAmber
     else -> FitFormColors.StatusRed
 }

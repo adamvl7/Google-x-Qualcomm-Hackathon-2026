@@ -85,6 +85,9 @@ dependencies {
     implementation(libs.litert.support)
     implementation(libs.litert.gpu)
 
+    // On-device Gemma recap generation
+    implementation(libs.mediapipe.tasks.genai)
+
     // ExoPlayer for replay
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

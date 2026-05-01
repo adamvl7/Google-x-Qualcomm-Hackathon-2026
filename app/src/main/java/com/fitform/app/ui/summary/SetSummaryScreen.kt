@@ -6,8 +6,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -22,6 +26,7 @@ import com.fitform.app.ui.components.TickerRule
 import com.fitform.app.ui.components.scoreColor
 import com.fitform.app.ui.theme.FitFormColors
 import com.fitform.app.ui.theme.FitFormType
+import kotlinx.coroutines.delay
 
 @Composable
 fun SetSummaryScreen(
@@ -119,6 +124,9 @@ fun SetSummaryScreen(
             }
         }
 
+        Spacer(Modifier.height(28.dp))
+        GemmaCoachCard(context = context, summary = s)
+
         Spacer(Modifier.height(36.dp))
         PrimaryButton(label = "Watch Replay", eyebrow = "REVIEW WITH OVERLAY", onClick = onWatchReplay)
         Spacer(Modifier.height(12.dp))
@@ -166,6 +174,112 @@ private fun RepRow(rep: RepData) {
             style = FitFormType.DisplayMd,
             color = scoreColor(rep.score),
         )
+    }
+}
+
+private enum class GemmaState { CHECKING, LOADING, TYPING, DONE, UNAVAILABLE }
+
+@Composable
+private fun GemmaCoachCard(context: android.content.Context, summary: SessionSummary) {
+    var state by remember { mutableStateOf(GemmaState.CHECKING) }
+    var displayedText by remember { mutableStateOf("") }
+    var fullText by remember { mutableStateOf("") }
+
+    LaunchedEffect(summary.sessionId) {
+        if (!GemmaCoach.isAvailable(context)) {
+            state = GemmaState.UNAVAILABLE
+            return@LaunchedEffect
+        }
+        state = GemmaState.LOADING
+        val result = GemmaCoach.generate(context, summary)
+        if (result == null) {
+            state = GemmaState.UNAVAILABLE
+            return@LaunchedEffect
+        }
+        fullText = result
+        state = GemmaState.TYPING
+        for (i in result.indices) {
+            displayedText = result.substring(0, i + 1)
+            delay(18)
+        }
+        state = GemmaState.DONE
+    }
+
+    SectionEyebrow("AI COACHING")
+    Spacer(Modifier.height(12.dp))
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(FitFormColors.Surface)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .background(
+                        when (state) {
+                            GemmaState.LOADING, GemmaState.TYPING -> FitFormColors.StatusAmber
+                            GemmaState.DONE -> FitFormColors.Acid
+                            else -> FitFormColors.Faint
+                        }
+                    ),
+            )
+            Text(
+                text = when (state) {
+                    GemmaState.CHECKING, GemmaState.LOADING -> "GEMMA · GENERATING"
+                    GemmaState.TYPING, GemmaState.DONE -> "GEMMA · ON-DEVICE"
+                    GemmaState.UNAVAILABLE -> "GEMMA · OFFLINE"
+                },
+                style = FitFormType.Eyebrow,
+                color = when (state) {
+                    GemmaState.LOADING, GemmaState.TYPING -> FitFormColors.StatusAmber
+                    GemmaState.DONE -> FitFormColors.Acid
+                    else -> FitFormColors.Faint
+                },
+            )
+        }
+
+        when (state) {
+            GemmaState.CHECKING, GemmaState.LOADING -> {
+                Text(
+                    text = "Analysing your set…",
+                    style = FitFormType.Body,
+                    color = FitFormColors.Mute,
+                )
+            }
+            GemmaState.TYPING -> {
+                Text(
+                    text = "$displayedText▋",
+                    style = FitFormType.BodyLg,
+                    color = FitFormColors.Bone,
+                )
+            }
+            GemmaState.DONE -> {
+                Text(
+                    text = fullText,
+                    style = FitFormType.BodyLg,
+                    color = FitFormColors.Bone,
+                )
+            }
+            GemmaState.UNAVAILABLE -> {
+                Text(
+                    text = "Push the Gemma model to enable on-device AI coaching.",
+                    style = FitFormType.Body,
+                    color = FitFormColors.Mute,
+                )
+                Text(
+                    text = "adb push gemma3-1B-it-int4.task /sdcard/Android/data/com.fitform.app/files/gemma/",
+                    style = FitFormType.Caption,
+                    color = FitFormColors.Faint,
+                )
+            }
+        }
     }
 }
 

@@ -2,42 +2,35 @@ package com.fitform.app.analysis.shot
 
 import com.fitform.app.analysis.GeometryUtils
 import com.fitform.app.model.AnalysisResult
+import com.fitform.app.model.Keypoint
 import com.fitform.app.model.KeypointIndex
 import com.fitform.app.model.PoseResult
 import com.fitform.app.model.Severity
 import com.fitform.app.model.Side
-import kotlin.math.abs
 
 /**
- * Side-view basketball jump-shot analyzer using the B.E.F. framework.
+ * Front-view basketball jump-shot analyzer.
  *
  * ── Camera positioning ───────────────────────────────────────────────────────
- * Phone should be placed at waist height, ~2–3 m away, pointing at the
- * athlete's shooting-hand side so the shooting arm is clearly visible.
+ * Phone should be placed at waist height, ~6–8 feet directly in FRONT of
+ * the athlete so the full body is visible face-on.
  *
- * ── B.E.F. Framework ─────────────────────────────────────────────────────────
- *   B — Balance      Knee bend on the load phase + level ankle landing
- *   E — Elbow        Elbow directly under the ball (wrist) at set-point
- *   F — Follow-thru  Full arm extension at release (high arc entry angle)
- *
- * We intentionally DO NOT evaluate: ball grip, guide-hand placement,
- * finger roll, wrist snap direction, or eye-on-rim tracking. Those
- * require either ball-tracking vision or wrist IMU data that pose
- * estimation alone cannot provide reliably on-device.
+ * ── Checks ───────────────────────────────────────────────────────────────────
+ *   1. Knee bend    — athlete must dip knees before/during the shot.
+ *   2. Elbow tuck   — shooting elbow should not flare out sideways ("chicken wing").
+ *   3. 90° set      — elbow (shoulder→elbow→wrist) should be ~90° at set-point.
  *
  * ── Cue priority (highest → lowest) ─────────────────────────────────────────
- *   1. Low keypoint confidence    → "Step back / improve lighting"
- *   2. Elbow misaligned at set    → "Elbow in"
- *   3. Insufficient arm extension → "Release higher"
- *   4. Shallow knee load          → "More knee bend"
- *   5. Unbalanced landing         → "Land balanced"
- *   6. All checks pass            → "Good shot form"
+ *   1. Low keypoint confidence  → "Step back / improve lighting"
+ *   2. Knee not bent            → "Bend your knees"
+ *   3. Elbow flare              → "Elbow in"
+ *   4. Elbow not at 90°         → "Elbow at 90°"
+ *   5. All checks pass          → "Good shot form"
  *
  * ── Shooting side selection ──────────────────────────────────────────────────
- * Because the athlete stands sideways, one arm faces the camera and the
- * other faces away — occluded. We pick whichever side has the higher
- * combined elbow + wrist confidence, which reliably selects the shooting
- * arm that is most visible in a side-view setup.
+ * In front view both arms are visible. We pick the arm whose wrist is highest
+ * (lowest y in image coords) — the raised arm is the shooting arm. When both
+ * wrists are low (resting), we pick the higher-confidence side.
  *
  * ── Scoring ──────────────────────────────────────────────────────────────────
  * Starts at 100; each failed check deducts points per SCORE_* constants.
@@ -45,9 +38,13 @@ import kotlin.math.abs
  */
 class ShotAnalyzer {
 
+    // Latched true once the knee bend threshold is met in a given shot cycle.
+    // Prevents re-penalizing the naturally straightening legs during the jump.
+    // Resets to false when the player returns to ready/standing position.
+    private var kneeBendAchieved = false
+
     fun analyze(pose: PoseResult): AnalysisResult {
-        // Guard: reject frames where overall pose confidence is too low to trust.
-        if (!GeometryUtils.sideViewBodyVisibilityCheck(pose) || pose.averageConfidence < 0.30f) {
+        if (pose.averageConfidence < 0.30f) {
             return AnalysisResult(
                 score = 0,
                 cue = "Step back / improve lighting",
@@ -58,9 +55,12 @@ class ShotAnalyzer {
             )
         }
 
-        // Lock to the shooting side (the arm that is most visible in side view).
-        val side = pickShootingSide(pose)
-        val ids  = GeometryUtils.indicesFor(side)
+        // Shooting arm = whichever wrist is highest (lowest y).
+        val leftWrist  = pose[KeypointIndex.LEFT_WRIST]
+        val rightWrist = pose[KeypointIndex.RIGHT_WRIST]
+        val side = if (leftWrist.confidence >= Keypoint.MIN_CONFIDENCE &&
+            leftWrist.y <= rightWrist.y) Side.LEFT else Side.RIGHT
+        val ids = GeometryUtils.indicesFor(side)
 
         val shoulder = pose[ids.shoulder]
         val elbow    = pose[ids.elbow]
@@ -69,9 +69,6 @@ class ShotAnalyzer {
         val knee     = pose[ids.knee]
         val ankle    = pose[ids.ankle]
 
-        // Secondary guard on the six joints we measure.
-        // 0.25 threshold — INT8 MoveNet produces lower raw confidence values than float32,
-        // and side-view occludes joints on the far side. Proceed with penalty below 0.55.
         val coreConfidence = GeometryUtils.confidenceAverage(
             listOf(shoulder, elbow, wrist, hip, knee, ankle)
         )
@@ -87,11 +84,15 @@ class ShotAnalyzer {
         }
 
         // ── Ready-state detection ─────────────────────────────────────────────
-        // If the wrist is well below the shoulder and the legs aren't loaded,
-        // the person is standing at rest — show a neutral ready cue.
-        val hipLoading = (hip.y - shoulder.y) > 0.18f
-        val wristResting = wrist.y > shoulder.y + 0.05f
-        if (wristResting && !hipLoading) {
+        // Only enter shot analysis when the wrist is clearly above shoulder level
+        // (shot is being loaded/released) OR the hips have dropped significantly
+        // (player is in the load dip). Requiring wrist above shoulder — not just
+        // above hip — prevents the "just standing holding the ball" case from
+        // triggering knee-bend feedback prematurely.
+        val wristAtSetPoint = wrist.y < shoulder.y   // wrist above shoulder = shot in progress
+        val hipDipping      = (hip.y - shoulder.y) > 0.15f
+        if (!wristAtSetPoint && !hipDipping) {
+            kneeBendAchieved = false   // reset for the next shot cycle
             return AnalysisResult(
                 score = 100,
                 cue = "Ready — begin your shot",
@@ -104,81 +105,50 @@ class ShotAnalyzer {
         var score = 100
         val cues = mutableListOf<Pair<String, Severity>>()
 
-        // ── Check E: Elbow alignment at set-point ─────────────────────────────
-        // A correct shooting motion has the elbow stacked directly under the
-        // wrist and ball — forming an "L" shape. Horizontal misalignment means
-        // the elbow is flared out ("chicken wing"), causing the ball to push
-        // sideways and the shot to miss left/right.
-        //
-        // Threshold: 0.08 normalized width ≈ 4–6 cm at typical filming distance.
-        // Below this margin the elbow is acceptably aligned for a recreational
-        // shooter; above it the deviation is visible and correctable with a cue.
-        val elbowOffset = GeometryUtils.absHorizontalOffset(elbow, wrist)
-        if (elbowOffset > ELBOW_OFFSET_LIMIT) {
-            score -= SCORE_ELBOW
+        // ── Check 1: Knee bend ────────────────────────────────────────────────
+        // Check during the load (hip dipping) OR set-point phase. The dip happens
+        // before the wrist reaches shoulder level, so we can't gate on wristAtSetPoint.
+        // Once a sufficient dip is detected, latch so the straightening jump legs
+        // don't re-trigger the cue.
+        if (!kneeBendAchieved) {
+            val kneeAngle = GeometryUtils.angleBetweenThreePoints(hip, knee, ankle)
+            if (kneeAngle <= KNEE_BEND_LIMIT) {
+                kneeBendAchieved = true   // good dip — latch for this shot cycle
+            } else if (wristAtSetPoint) {
+                // Only penalize if the wrist is already at set-point and knees still
+                // haven't bent — not during the very start of a hip dip.
+                score -= SCORE_KNEE_BEND
+                cues += "Bend your knees" to Severity.YELLOW
+            }
+        }
+
+        // ── Check 2: Elbow tuck — no chicken wing ─────────────────────────────
+        // In front view, the shooting elbow should sit directly below the shoulder
+        // (upper arm roughly vertical). If the elbow drifts sideways of the shoulder
+        // the upper arm is flaring out — classic chicken wing.
+        // Measure: horizontal distance between shoulder and elbow.
+        val elbowFlare = GeometryUtils.absHorizontalOffset(shoulder, elbow)
+        if (elbowFlare > ELBOW_FLARE_LIMIT) {
+            score -= SCORE_ELBOW_TUCK
             cues += "Elbow in" to Severity.YELLOW
         }
 
-        // ── Check F: Release / arm extension ──────────────────────────────────
-        // The shoulder→elbow→wrist angle at release:
-        //   • 180° = fully straight arm (textbook follow-through)
-        //   • ~160–175° = typical NBA release (Klay Thompson, Steph Curry)
-        //   •  130° = minimum threshold; below this the athlete is clearly
-        //             "pushing" short without extending, flat low-arc shot
-        //
-        // Gate: wrist must be at least 12% of frame height above shoulder
-        // (wrist.y < shoulder.y - 0.12). A tighter gate avoids firing during
-        // the early arm raise before the athlete reaches the release window.
-        val wristAboveShoulder = wrist.y < shoulder.y - 0.12f
-        if (wristAboveShoulder) {
-            val releaseAngle = GeometryUtils.angleBetweenThreePoints(shoulder, elbow, wrist)
-            if (releaseAngle < RELEASE_ANGLE_MIN) {
-                score -= SCORE_RELEASE
-                cues += "Release higher" to Severity.YELLOW
+        // ── Check 3: 90° elbow at set-point ──────────────────────────────────
+        // At a true 90° set-point the forearm points straight at the camera, so
+        // the elbow and wrist share nearly the same x-coordinate in front view.
+        // If the wrist is displaced sideways of the elbow the forearm is angled —
+        // the elbow is NOT at 90°.
+        // Gate: only check while wrist is at or above shoulder level (set-point window).
+        val atSetPoint = wrist.y <= shoulder.y + 0.05f
+        if (atSetPoint) {
+            val forearmLateral = GeometryUtils.absHorizontalOffset(elbow, wrist)
+            if (forearmLateral > ELBOW_ANGLE_TOLERANCE) {
+                score -= SCORE_ELBOW_ANGLE
+                cues += "Elbow at 90°" to Severity.YELLOW
             }
         }
 
-        // ── Check B (legs): Knee bend during the load phase ──────────────────
-        // The loading dip stores elastic energy in the legs that powers the
-        // jump and transfers force into the shot. The hip→knee→ankle angle:
-        //   • 90°  = deep squat position (too deep for a shot)
-        //   • ~130–145° = typical shooting stance dip
-        //   • 155° = nearly straight; less than 25° of bend — barely any load
-        //
-        // Gate: only check when the hip is meaningfully lower than the shoulder
-        // (hip.y > shoulder.y + 0.18), which indicates the athlete has initiated
-        // the dip rather than just standing at rest.
-        val hipLoaded = (hip.y - shoulder.y) > 0.18f
-        if (hipLoaded) {
-            val kneeAngle = GeometryUtils.angleBetweenThreePoints(hip, knee, ankle)
-            if (kneeAngle > KNEE_BEND_LIMIT) {
-                score -= SCORE_KNEE_BEND
-                cues += "More knee bend" to Severity.YELLOW
-            }
-        }
-
-        // ── Check B (landing): Balanced ankle landing ─────────────────────────
-        // After a jump shot the athlete should land with both feet level to
-        // distribute impact and avoid ankle/knee stress. We compare the y
-        // positions of left and right ankle keypoints.
-        //
-        // Threshold: 0.05 normalized frame height ≈ 3–4 cm difference. Only
-        // evaluated when both ankles have reasonable confidence (> 0.4), so
-        // we don't penalise when one ankle is occluded by the body.
-        val leftAnkle  = pose[KeypointIndex.LEFT_ANKLE]
-        val rightAnkle = pose[KeypointIndex.RIGHT_ANKLE]
-        if (leftAnkle.confidence > 0.4f && rightAnkle.confidence > 0.4f) {
-            val ankleTilt = GeometryUtils.absVerticalOffset(leftAnkle, rightAnkle)
-            if (ankleTilt > LANDING_TILT_LIMIT) {
-                score -= SCORE_LANDING
-                cues += "Land balanced" to Severity.YELLOW
-            }
-        }
-
-        // Mild deduction for borderline confidence (passes the 0.40 guard but
-        // still noisy enough to reduce scoring reliability).
         if (coreConfidence < 0.55f) score -= SCORE_LOW_CONF
-
         score = score.coerceIn(0, 100)
 
         val (cue, severity) = when {
@@ -199,58 +169,21 @@ class ShotAnalyzer {
         )
     }
 
-    /**
-     * Selects the shooting side as whichever arm (elbow + wrist pair) has the
-     * higher total confidence. In a side-view setup the shooting arm faces the
-     * camera and is reliably tracked; the guide arm faces away and has lower
-     * confidence scores, so this heuristic consistently selects the right side
-     * without requiring the user to specify their dominant hand.
-     */
-    private fun pickShootingSide(pose: PoseResult): Side {
-        val leftScore  = pose[KeypointIndex.LEFT_ELBOW].confidence + pose[KeypointIndex.LEFT_WRIST].confidence
-        val rightScore = pose[KeypointIndex.RIGHT_ELBOW].confidence + pose[KeypointIndex.RIGHT_WRIST].confidence
-        return if (rightScore >= leftScore) Side.RIGHT else Side.LEFT
-    }
-
     companion object {
-        // Geometry thresholds — all in the same unit as MoveNet keypoint
-        // coordinates: normalized [0, 1] where 1 = full frame dimension.
-        // Angles are in degrees.
+        /** Hip→knee→ankle angle above which the knee load is insufficient. */
+        private const val KNEE_BEND_LIMIT = 160f
 
-        /**
-         * Maximum horizontal offset (normalized width) between elbow and wrist
-         * before the "Elbow in" cue triggers. 0.08 ≈ one hand-width at typical
-         * filming distance.
-         */
-        private const val ELBOW_OFFSET_LIMIT = 0.08f
+        /** Max lateral shoulder-to-elbow offset (normalized width) before chicken-wing cue.
+         *  Upper arm should be roughly vertical — elbow directly below shoulder. */
+        private const val ELBOW_FLARE_LIMIT = 0.08f
 
-        /**
-         * Minimum shoulder→elbow→wrist angle at release. Below 130° the athlete
-         * is clearly not extending — NBA shooters (Klay, Curry) release at 160–175°.
-         * 130° gives recreational players room while still catching genuinely short
-         * releases. Gate is also tightened to wrist 12% above shoulder.
-         */
-        private const val RELEASE_ANGLE_MIN = 130f
+        /** Max lateral elbow-to-wrist offset at set-point before "Elbow at 90°" cue.
+         *  At true 90° the forearm points at the camera, so elbow x ≈ wrist x. */
+        private const val ELBOW_ANGLE_TOLERANCE = 0.07f
 
-        /**
-         * Maximum hip→knee→ankle angle during the loading phase. Above 155°
-         * means the athlete has barely bent their knees — insufficient to
-         * generate vertical force for the jump.
-         */
-        private const val KNEE_BEND_LIMIT = 155f
-
-        /**
-         * Maximum ankle y-offset (normalized height) for a balanced landing.
-         * 0.05 ≈ 3–4 cm at typical filming distance — a clearly lopsided
-         * landing is detectable and worth cueing.
-         */
-        private const val LANDING_TILT_LIMIT = 0.05f
-
-        // Score deductions per failed check.
-        private const val SCORE_ELBOW     = 25
-        private const val SCORE_RELEASE   = 20
-        private const val SCORE_KNEE_BEND = 20
-        private const val SCORE_LANDING   = 20
-        private const val SCORE_LOW_CONF  = 15
+        private const val SCORE_KNEE_BEND   = 30
+        private const val SCORE_ELBOW_TUCK  = 35
+        private const val SCORE_ELBOW_ANGLE = 35
+        private const val SCORE_LOW_CONF    = 15
     }
 }

@@ -32,7 +32,7 @@ fun SetupScreen(
     }
     val instruction = when (mode) {
         ExerciseMode.GYM -> "Place your phone 6–8 feet away at hip height. Stand sideways so your full body is visible."
-        ExerciseMode.SHOT -> "Place your phone 6–8 feet away from your shooting side. Stand sideways so your full body, shooting arm, knees, and landing position are visible."
+        ExerciseMode.SHOT -> "Place your phone 6–8 feet directly in front of you. Face the camera so your full body, both arms, and knees are visible."
     }
     val checks = when (mode) {
         ExerciseMode.GYM -> listOf(
@@ -41,8 +41,8 @@ fun SetupScreen(
             "Even lighting, no backlight" to "Avoid windows directly behind you",
         )
         ExerciseMode.SHOT -> listOf(
-            "Side-on view from your shooting side" to "Shoulder · elbow · wrist all in frame",
-            "Capture loading + release + landing" to "Knees in frame on the catch, feet on the land",
+            "Face the camera directly" to "Both shoulders · elbows · wrists in frame",
+            "Full body visible head to toe" to "Knees and feet must be in frame",
             "Even lighting, no backlight" to "Gym lights overhead are ideal",
         )
     }

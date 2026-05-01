@@ -55,7 +55,11 @@ class SessionRecorder(
     private val reps = mutableListOf<RepData>()
 
     private var currentRep: PendingRep? = null
-    private var bestForCurrentRep: AnalysisResult? = null
+    // Average score across all active-tracking frames during the rep (excludes standing frames).
+    private var repScoreSum: Int = 0
+    private var repScoreCount: Int = 0
+    // Lowest-scoring frame gives the most relevant topCue.
+    private var worstForCurrentRep: AnalysisResult? = null
     private var allowVideo: Boolean = true
 
     val isActive: Boolean get() = session != null
@@ -109,9 +113,13 @@ class SessionRecorder(
         }
 
         val rep = currentRep
-        if (rep != null && result.tracking) {
-            val best = bestForCurrentRep
-            if (best == null || result.score > best.score) bestForCurrentRep = result
+        // Accumulate rep stats — exclude standing frames (score=100, cue="Standing…") and
+        // non-tracking frames so the reported score reflects actual movement quality.
+        if (rep != null && result.tracking && result.score < 100) {
+            repScoreSum += result.score
+            repScoreCount++
+            val worst = worstForCurrentRep
+            if (worst == null || result.score < worst.score) worstForCurrentRep = result
         }
 
         // Record only meaningful (non-green) cue transitions to avoid spam.
@@ -133,24 +141,29 @@ class SessionRecorder(
         if (currentRep != null) return
         val ts = SystemClock.elapsedRealtime() - startedAtElapsedMs
         currentRep = PendingRep(repNumber = reps.size + 1, startMs = ts)
-        bestForCurrentRep = null
+        repScoreSum = 0
+        repScoreCount = 0
+        worstForCurrentRep = null
     }
 
     /** Closes the in-progress rep and returns its computed [RepData]. */
     fun endRep(latestResult: AnalysisResult?): RepData? {
         val rep = currentRep ?: return null
         val ts = SystemClock.elapsedRealtime() - startedAtElapsedMs
-        val best = bestForCurrentRep ?: latestResult
+        val avgScore = if (repScoreCount > 0) repScoreSum / repScoreCount else latestResult?.score ?: 0
+        val worst = worstForCurrentRep ?: latestResult
         val data = RepData(
             repNumber = rep.repNumber,
             startTimestampMs = rep.startMs,
             endTimestampMs = ts,
-            score = best?.score ?: 0,
-            topCue = best?.cue ?: "Tracking",
+            score = avgScore,
+            topCue = worst?.cue ?: "Tracking",
         )
         reps.add(data)
         currentRep = null
-        bestForCurrentRep = null
+        repScoreSum = 0
+        repScoreCount = 0
+        worstForCurrentRep = null
         return data
     }
 

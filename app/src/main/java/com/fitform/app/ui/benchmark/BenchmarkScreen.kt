@@ -3,12 +3,29 @@ package com.fitform.app.ui.benchmark
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -62,7 +79,7 @@ fun BenchmarkScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
         Text(
-            "MoveNet Lightning · 192×192 · ${if (results == null) "running…" else "50 inferences"}",
+            "LiteHRNet | 256x192 | ${if (results == null) "running..." else "50 inferences"}",
             style = FitFormType.Caption,
             color = FitFormColors.Mute,
         )
@@ -210,8 +227,8 @@ fun BenchmarkScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             Text(
                 "One call to addDelegate(NnApiDelegate()) routes all supported ops " +
-                "to the Snapdragon Hexagon DSP. No driver changes, no model recompilation — " +
-                "LiteRT handles dispatch automatically.",
+                    "to the Snapdragon Hexagon DSP. No driver changes, no model recompilation - " +
+                    "LiteRT handles dispatch automatically.",
                 style = FitFormType.Body,
                 color = FitFormColors.Mute,
             )
@@ -233,9 +250,9 @@ fun BenchmarkScreen(onBack: () -> Unit) {
 @Composable
 private fun BackendBar(result: BackendResult, maxMs: Float) {
     val tierColor = when (result.powerTier) {
-        PowerTier.LOW    -> FitFormColors.Acid
+        PowerTier.LOW -> FitFormColors.Acid
         PowerTier.MEDIUM -> FitFormColors.StatusAmber
-        PowerTier.HIGH   -> FitFormColors.StatusRed
+        PowerTier.HIGH -> FitFormColors.StatusRed
     }
     val fraction = if (result.available && maxMs > 0) result.avgMs / maxMs else 0f
     val animatedFraction by animateFloatAsState(
@@ -263,7 +280,7 @@ private fun BackendBar(result: BackendResult, maxMs: Float) {
                 Box(
                     Modifier
                         .size(6.dp)
-                        .background(if (result.available) tierColor else FitFormColors.Faint)
+                        .background(if (result.available) tierColor else FitFormColors.Faint),
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(result.name, style = FitFormType.LabelLg, color = FitFormColors.Bone)
@@ -278,7 +295,7 @@ private fun BackendBar(result: BackendResult, maxMs: Float) {
             }
             if (result.available) {
                 Text(
-                    "${result.avgMs}ms avg  ·  ${result.minMs}ms min",
+                    "${result.avgMs}ms avg | ${result.minMs}ms min",
                     style = FitFormType.Eyebrow,
                     color = tierColor,
                 )
@@ -287,7 +304,6 @@ private fun BackendBar(result: BackendResult, maxMs: Float) {
             }
         }
 
-        // Bar track
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -341,12 +357,9 @@ private fun CodeCard() {
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("CPU — default", style = FitFormType.Caption, color = FitFormColors.Faint)
-        MonoBlock(
-            """Interpreter.Options()""",
-            highlight = false,
-        )
-        Text("NPU — one line added ↓", style = FitFormType.Caption, color = FitFormColors.Acid)
+        Text("CPU - default", style = FitFormType.Caption, color = FitFormColors.Faint)
+        MonoBlock("""Interpreter.Options()""", highlight = false)
+        Text("NPU - one line added", style = FitFormType.Caption, color = FitFormColors.Acid)
         MonoBlock(
             "Interpreter.Options().apply {\n    addDelegate(NnApiDelegate())\n}",
             highlight = true,
@@ -378,8 +391,8 @@ private fun MonoBlock(code: String, highlight: Boolean) {
 @Composable
 private fun PipelineCard() {
     val models = listOf(
-        Triple("01", "MoveNet Lightning", "17-keypoint pose estimation · 30 fps"),
-        Triple("02", "FormClassifier", "Angle-to-score network · INT8 quant"),
+        Triple("01", "LiteHRNet", "17-keypoint pose estimation | Qualcomm export"),
+        Triple("02", "FormClassifier", "Angle-to-score network | INT8 quant"),
     )
     Column(
         modifier = Modifier
@@ -394,7 +407,7 @@ private fun PipelineCard() {
         ) {
             Box(Modifier.size(6.dp).background(FitFormColors.Acid))
             Text(
-                "BOTH MODELS USE NNAPI DELEGATE → HEXAGON DSP",
+                "BOTH MODELS USE NNAPI DELEGATE -> HEXAGON DSP",
                 style = FitFormType.Eyebrow,
                 color = FitFormColors.Acid,
             )

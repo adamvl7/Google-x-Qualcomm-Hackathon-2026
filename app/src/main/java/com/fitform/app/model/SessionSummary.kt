@@ -17,6 +17,7 @@ data class SessionSummary(
     val reps: List<RepData>,
     val frameData: List<FrameData>,
     val events: List<SessionEvent>,
+    val recap: SetRecap? = null,
 ) {
     fun topCues(limit: Int = 3): List<String> =
         events.asSequence()
@@ -29,3 +30,14 @@ data class SessionSummary(
             .map { it.key }
             .toList()
 }
+
+@Serializable
+data class SetRecap(
+    val status: String,
+    val modelName: String,
+    val generatedAt: String,
+    val overall: String,
+    val wentWell: List<String> = emptyList(),
+    val needsWork: List<String> = emptyList(),
+    val tips: List<String> = emptyList(),
+)

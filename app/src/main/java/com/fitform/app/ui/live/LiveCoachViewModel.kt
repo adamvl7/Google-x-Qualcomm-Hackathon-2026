@@ -16,6 +16,7 @@ import com.fitform.app.model.Severity
 import com.fitform.app.pose.LiteRtPoseEstimator
 import com.fitform.app.pose.MockPoseEstimator
 import com.fitform.app.pose.PoseEstimator
+import com.fitform.app.pose.PoseSmoother
 import com.fitform.app.recording.SessionRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +52,7 @@ class LiveCoachViewModel(
     @Volatile private var poseEstimator: PoseEstimator? = null
 
     private val feedback = FeedbackEngine(mode)
+    private val poseSmoother = PoseSmoother()
 
     private val recorder = SessionRecorder(
         context = app,
@@ -87,6 +89,7 @@ class LiveCoachViewModel(
 
     private val analysisMutex = Mutex()
     private var lastResult: AnalysisResult? = null
+    private var lastPose: PoseResult = PoseResult.EMPTY
 
     // ── Score smoothing (EMA) ─────────────────────────────────────────────────
     // Shot mode uses a higher alpha (0.28) so the score updates fast enough to
@@ -134,7 +137,13 @@ class LiveCoachViewModel(
                     proxy.close()
                     return@withLock
                 }
-                val pose: PoseResult = estimator.estimatePose(proxy) ?: return@withLock
+                val rawPose = estimator.estimatePose(proxy)
+                if (rawPose == null) {
+                    _uiState.update { it.copy(pose = lastPose, tracking = false) }
+                    return@withLock
+                }
+                val pose: PoseResult = poseSmoother.smooth(rawPose)
+                lastPose = pose
                 val result = feedback.analyze(pose)
                 lastResult = result
 
@@ -177,6 +186,7 @@ class LiveCoachViewModel(
     }
 
     fun startSet() {
+        poseSmoother.reset()
         recorder.start()
         repDetector.reset()
         repDetector.active = true

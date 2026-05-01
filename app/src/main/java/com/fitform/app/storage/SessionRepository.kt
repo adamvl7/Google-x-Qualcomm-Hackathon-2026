@@ -15,6 +15,8 @@ class SessionRepository(context: Context) {
 
     fun load(sessionId: String): SessionSummary? = storage.loadAnalysis(sessionId)
 
+    fun save(sessionId: String, summary: SessionSummary) = storage.saveAnalysis(sessionId, summary)
+
     fun videoFile(sessionId: String) = storage.videoFile(sessionId)
 
     fun delete(sessionId: String): Boolean = storage.delete(sessionId)

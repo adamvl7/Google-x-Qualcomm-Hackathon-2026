@@ -14,7 +14,7 @@ import kotlin.math.sin
  * Generates a believable side-view skeleton that animates through the
  * target movement, so the UI can be developed without the LiteRT
  * runtime. Only used when [LiteRtPoseEstimator] fails to load
- * (e.g. movenet_lightning.tflite isn't in assets).
+ * (for example when the LiteHRNet asset isn't in assets).
  *
  * The phase parameter is derived from wall clock so cues progress
  * naturally even if no rep boundaries are tapped.

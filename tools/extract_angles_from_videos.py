@@ -2,23 +2,20 @@
 extract_angles_from_videos.py
 ─────────────────────────────
 Extracts biomechanical angle features from exercise videos using MediaPipe
-and appends labeled rows to a CSV training file.
+Tasks API (0.10.x+) and appends labeled rows to a CSV training file.
 
 Usage
 ─────
   pip install mediapipe opencv-python numpy
 
-  # Put videos in a folder, named with a prefix:
+  # Put videos in a folder, named with 'good' or 'bad' in the filename:
   #   squat_good_*.mp4   → label 1.0 (good form)
   #   squat_bad_*.mp4    → label 0.0 (bad form)
-  #   shot_good_*.mp4    → label 1.0
-  #   shot_bad_*.mp4     → label 0.0
 
   python extract_angles_from_videos.py \
       --input_dir  ./videos/squat \
       --output_csv ./training_data/squat_training.csv \
-      --mode       squat \
-      --fps        10          # sample every Nth frame (10fps from 30fps video)
+      --mode       squat
 
   python extract_angles_from_videos.py \
       --input_dir  ./videos/shot \
@@ -37,20 +34,43 @@ import argparse
 import csv
 import math
 import os
-import sys
+import urllib.request
 
 import cv2
 import mediapipe as mp
 import numpy as np
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
 
-mp_pose = mp.solutions.pose
+# ── Model download ─────────────────────────────────────────────────────────────
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(SCRIPT_DIR, "pose_landmarker_lite.task")
+MODEL_URL  = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
+)
+
+def ensure_model():
+    if not os.path.exists(MODEL_PATH):
+        print(f"Downloading pose landmarker model to {MODEL_PATH} …")
+        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+        print("Download complete.")
+
+# ── Landmark indices (MediaPipe 33-point body model) ──────────────────────────
+# https://developers.google.com/mediapipe/solutions/vision/pose_landmarker
+
+IDX = {
+    "nose": 0,
+    "left_shoulder": 11,  "right_shoulder": 12,
+    "left_elbow":    13,  "right_elbow":    14,
+    "left_wrist":    15,  "right_wrist":    16,
+    "left_hip":      23,  "right_hip":      24,
+    "left_knee":     25,  "right_knee":     26,
+    "left_ankle":    27,  "right_ankle":    28,
+}
 
 # ── Geometry helpers ───────────────────────────────────────────────────────────
-
-def _landmark(results, idx):
-    lm = results.pose_landmarks.landmark[idx]
-    return lm.x, lm.y, lm.visibility
-
 
 def angle_three_points(ax, ay, bx, by, cx, cy) -> float:
     """Angle in degrees at vertex B."""
@@ -69,66 +89,80 @@ def trunk_lean(sx, sy, hx, hy) -> float:
     return math.degrees(math.atan2(dx, dy))
 
 
+def lm(landmarks, name):
+    """Return (x, y, visibility) for a named landmark."""
+    l = landmarks[IDX[name]]
+    return l.x, l.y, getattr(l, "visibility", 1.0)
+
+
 # ── Feature extraction ─────────────────────────────────────────────────────────
 
-L = mp_pose.PoseLandmark
-
-def extract_squat(results) -> list[float] | None:
+def extract_squat(landmarks) -> list | None:
     """Returns [knee_angle/180, trunk_lean/90, knee_forward/0.3, hip_balance/0.1]."""
     try:
-        lx = {k: _landmark(results, k) for k in [
-            L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE,
-            L.RIGHT_SHOULDER, L.RIGHT_HIP, L.RIGHT_KNEE, L.RIGHT_ANKLE,
-        ]}
-        # Pick the side with higher hip+knee+ankle visibility
-        left_conf  = lx[L.LEFT_HIP][2]  + lx[L.LEFT_KNEE][2]  + lx[L.LEFT_ANKLE][2]
-        right_conf = lx[L.RIGHT_HIP][2] + lx[L.RIGHT_KNEE][2] + lx[L.RIGHT_ANKLE][2]
+        l_hip_v  = lm(landmarks, "left_hip")[2]
+        r_hip_v  = lm(landmarks, "right_hip")[2]
+        l_knee_v = lm(landmarks, "left_knee")[2]
+        r_knee_v = lm(landmarks, "right_knee")[2]
+        l_ank_v  = lm(landmarks, "left_ankle")[2]
+        r_ank_v  = lm(landmarks, "right_ankle")[2]
+
+        left_conf  = l_hip_v  + l_knee_v + l_ank_v
+        right_conf = r_hip_v + r_knee_v + r_ank_v
+
         if left_conf >= right_conf:
-            sh, hi, kn, an = L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE
+            sx, sy, _ = lm(landmarks, "left_shoulder")
+            hx, hy, _ = lm(landmarks, "left_hip")
+            kx, ky, _ = lm(landmarks, "left_knee")
+            ax, ay, _ = lm(landmarks, "left_ankle")
         else:
-            sh, hi, kn, an = L.RIGHT_SHOULDER, L.RIGHT_HIP, L.RIGHT_KNEE, L.RIGHT_ANKLE
+            sx, sy, _ = lm(landmarks, "right_shoulder")
+            hx, hy, _ = lm(landmarks, "right_hip")
+            kx, ky, _ = lm(landmarks, "right_knee")
+            ax, ay, _ = lm(landmarks, "right_ankle")
 
-        sx, sy, _ = lx[sh]; hx, hy, _ = lx[hi]
-        kx, ky, _ = lx[kn]; ax, ay, _ = lx[an]
-        lhx, lhy, _ = lx[L.LEFT_HIP]; rhx, rhy, _ = lx[L.RIGHT_HIP]
+        _, lhy, _ = lm(landmarks, "left_hip")
+        _, rhy, _ = lm(landmarks, "right_hip")
 
-        knee_angle   = angle_three_points(hx,hy, kx,ky, ax,ay) / 180.0
-        trunk        = trunk_lean(sx, sy, hx, hy) / 90.0
-        knee_fwd     = min(abs(kx - ax) / 0.30, 1.0)
-        hip_balance  = min(abs(lhy - rhy) / 0.10, 1.0)
+        knee_angle  = angle_three_points(hx, hy, kx, ky, ax, ay) / 180.0
+        trunk       = trunk_lean(sx, sy, hx, hy) / 90.0
+        knee_fwd    = min(abs(kx - ax) / 0.30, 1.0)
+        hip_balance = min(abs(lhy - rhy) / 0.10, 1.0)
 
         return [knee_angle, trunk, knee_fwd, hip_balance]
     except Exception:
         return None
 
 
-def extract_shot(results) -> list[float] | None:
+def extract_shot(landmarks) -> list | None:
     """Returns [elbow_offset/0.3, release_angle/180, knee_bend/180, landing_tilt/0.1]."""
     try:
-        needed = [
-            L.LEFT_ELBOW, L.LEFT_WRIST, L.RIGHT_ELBOW, L.RIGHT_WRIST,
-            L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE,
-            L.RIGHT_SHOULDER, L.RIGHT_HIP, L.RIGHT_KNEE, L.RIGHT_ANKLE,
-            L.LEFT_ANKLE, L.RIGHT_ANKLE,
-        ]
-        lx = {k: _landmark(results, k) for k in needed}
+        l_el_v = lm(landmarks, "left_elbow")[2]
+        r_el_v = lm(landmarks, "right_elbow")[2]
+        l_wr_v = lm(landmarks, "left_wrist")[2]
+        r_wr_v = lm(landmarks, "right_wrist")[2]
 
-        left_arm  = lx[L.LEFT_ELBOW][2]  + lx[L.LEFT_WRIST][2]
-        right_arm = lx[L.RIGHT_ELBOW][2] + lx[L.RIGHT_WRIST][2]
-        if right_arm >= left_arm:
-            sh, el, wr = L.RIGHT_SHOULDER, L.RIGHT_ELBOW, L.RIGHT_WRIST
-            hi, kn, an = L.RIGHT_HIP, L.RIGHT_KNEE, L.RIGHT_ANKLE
+        if r_el_v + r_wr_v >= l_el_v + l_wr_v:
+            sx, sy, _ = lm(landmarks, "right_shoulder")
+            ex, ey, _ = lm(landmarks, "right_elbow")
+            wx, wy, _ = lm(landmarks, "right_wrist")
+            hx, hy, _ = lm(landmarks, "right_hip")
+            kx, ky, _ = lm(landmarks, "right_knee")
+            ax, ay, _ = lm(landmarks, "right_ankle")
         else:
-            sh, el, wr = L.LEFT_SHOULDER, L.LEFT_ELBOW, L.LEFT_WRIST
-            hi, kn, an = L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE
+            sx, sy, _ = lm(landmarks, "left_shoulder")
+            ex, ey, _ = lm(landmarks, "left_elbow")
+            wx, wy, _ = lm(landmarks, "left_wrist")
+            hx, hy, _ = lm(landmarks, "left_hip")
+            kx, ky, _ = lm(landmarks, "left_knee")
+            ax, ay, _ = lm(landmarks, "left_ankle")
 
-        sx, sy, _ = lx[sh]; ex_, ey, _ = lx[el]; wsx, wsy, _ = lx[wr]
-        hx, hy, _ = lx[hi]; kx, ky, _ = lx[kn]; ax, ay, _ = lx[an]
-        lax, lay, _ = lx[L.LEFT_ANKLE]; rax, ray, _ = lx[L.RIGHT_ANKLE]
+        _, lay, _ = lm(landmarks, "left_ankle")
+        _, ray, _ = lm(landmarks, "right_ankle")
 
-        elbow_off    = min(abs(ex_ - wsx) / 0.30, 1.0)
-        release_ang  = angle_three_points(sx,sy, ex_,ey, wsx,wsy) / 180.0
-        knee_bend    = angle_three_points(hx,hy, kx,ky, ax,ay) / 180.0
+        elbow_off    = min(abs(ex - wx) / 0.30, 1.0)
+        release_ang  = angle_three_points(sx, sy, ex, ey, wx, wy) / 180.0
+        knee_bend    = angle_three_points(hx, hy, kx, ky, ax, ay) / 180.0
         landing_tilt = min(abs(lay - ray) / 0.10, 1.0)
 
         return [elbow_off, release_ang, knee_bend, landing_tilt]
@@ -139,7 +173,7 @@ def extract_shot(results) -> list[float] | None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def process_video(path: str, mode: str, label: float, sample_every: int,
-                  writer: csv.writer, pose) -> int:
+                  writer: csv.writer, landmarker) -> int:
     cap = cv2.VideoCapture(path)
     frame_idx = 0
     written = 0
@@ -149,9 +183,11 @@ def process_video(path: str, mode: str, label: float, sample_every: int,
             break
         if frame_idx % sample_every == 0:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = pose.process(rgb)
-            if results.pose_landmarks:
-                feats = extract_squat(results) if mode == "squat" else extract_shot(results)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = landmarker.detect(mp_image)
+            if result.pose_landmarks:
+                lms = result.pose_landmarks[0]
+                feats = extract_squat(lms) if mode == "squat" else extract_shot(lms)
                 if feats is not None:
                     writer.writerow(feats + [label])
                     written += 1
@@ -166,8 +202,10 @@ def main():
     parser.add_argument("--output_csv", required=True)
     parser.add_argument("--mode",       choices=["squat", "shot"], required=True)
     parser.add_argument("--fps",        type=int, default=10,
-                        help="Sample 1 frame every N frames (default 10 = 3fps from 30fps)")
+                        help="Sample 1 frame every N frames (default 10 ≈ 3fps from 30fps video)")
     args = parser.parse_args()
+
+    ensure_model()
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output_csv)), exist_ok=True)
     file_exists = os.path.exists(args.output_csv)
@@ -177,13 +215,23 @@ def main():
         "shot":  ["elbow_offset", "release_angle", "knee_bend", "landing_tilt", "label"],
     }[args.mode]
 
+    base_options = mp_python.BaseOptions(model_asset_path=MODEL_PATH)
+    options = mp_vision.PoseLandmarkerOptions(
+        base_options=base_options,
+        running_mode=mp_vision.RunningMode.IMAGE,
+        num_poses=1,
+        min_pose_detection_confidence=0.5,
+        min_pose_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+
     total = 0
     with open(args.output_csv, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(headers)
 
-        with mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5) as pose:
+        with mp_vision.PoseLandmarker.create_from_options(options) as landmarker:
             for fname in sorted(os.listdir(args.input_dir)):
                 if not fname.lower().endswith((".mp4", ".mov", ".avi")):
                     continue
@@ -197,8 +245,8 @@ def main():
                     continue
 
                 path = os.path.join(args.input_dir, fname)
-                n = process_video(path, args.mode, label, args.fps, writer, pose)
-                print(f"  {fname:40s}  label={label:.0f}  rows={n}")
+                n = process_video(path, args.mode, label, args.fps, writer, landmarker)
+                print(f"  {fname:50s}  label={label:.0f}  rows={n}")
                 total += n
 
     print(f"\nDone. {total} rows appended to {args.output_csv}")

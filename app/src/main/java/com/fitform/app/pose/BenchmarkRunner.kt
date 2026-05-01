@@ -35,21 +35,14 @@ data class BackendResult(
 )
 
 /**
- * Runs MoveNet Lightning on CPU, GPU, and NPU (Hexagon via NNAPI) and
- * measures inference latency for each backend.
- *
- * Used by BenchmarkScreen to give judges a live comparison showing that
- * adding one line — `addDelegate(NnApiDelegate())` — routes ops to the
- * NPU and cuts latency by 3–5x versus CPU alone.
- *
- * 5 warmup + 30 timed inferences per backend, zeroed dummy input.
+ * Runs LiteHRNet on CPU, GPU, and NPU (Hexagon via NNAPI) and measures
+ * inference latency for each backend.
  */
 object BenchmarkRunner {
     private const val TAG = "FitForm/Benchmark"
     private const val MODEL_FILE = "movenet_lightning.tflite"
     private const val WARMUP_RUNS = 5
     private const val TIMED_RUNS = 30
-    private const val INPUT_BYTES = 1 * 192 * 192 * 3 * 4  // float32
 
     suspend fun run(
         context: Context,
@@ -62,7 +55,7 @@ object BenchmarkRunner {
         }.getOrDefault(false)
 
         if (!assetExists) {
-            Log.w(TAG, "$MODEL_FILE missing — cannot benchmark")
+            Log.w(TAG, "$MODEL_FILE missing - cannot benchmark")
             return@withContext listOf(
                 BackendResult("Hexagon NPU", 0L, 0L, false, PowerTier.LOW, subtitle = "via NNAPI delegate"),
                 BackendResult("GPU", 0L, 0L, false, PowerTier.MEDIUM),
@@ -122,8 +115,6 @@ object BenchmarkRunner {
 
     private fun benchmarkGpu(buffer: java.nio.MappedByteBuffer): BackendResult {
         return try {
-            // GpuDelegate loaded via reflection so the benchmark degrades gracefully
-            // on devices where litert-gpu native libs are absent.
             val delegateClass = Class.forName("org.tensorflow.lite.gpu.GpuDelegate")
             val delegate = delegateClass.getDeclaredConstructor().newInstance()
             val opts = Interpreter.Options().apply {
@@ -160,7 +151,7 @@ object BenchmarkRunner {
         val interp = Interpreter(buffer, opts)
         val inputSize = interp.getInputTensor(0).numBytes()
         val input = ByteBuffer.allocateDirect(inputSize).order(ByteOrder.nativeOrder())
-        val output = Array(1) { Array(1) { Array(17) { FloatArray(3) } } }
+        val output = createOutputTemplate(interp.getOutputTensor(0).shape())
 
         repeat(WARMUP_RUNS) { interp.run(input, output) }
 
@@ -176,5 +167,12 @@ object BenchmarkRunner {
         }
         interp.close()
         return (totalMs / TIMED_RUNS) to minMs
+    }
+
+    private fun createOutputTemplate(shape: IntArray): Any = when {
+        shape.contentEquals(intArrayOf(1, 17, 2)) -> Array(1) { Array(17) { FloatArray(2) } }
+        shape.contentEquals(intArrayOf(1, 17, 3)) -> Array(1) { Array(17) { FloatArray(3) } }
+        shape.contentEquals(intArrayOf(1, 1, 17, 3)) -> Array(1) { Array(1) { Array(17) { FloatArray(3) } } }
+        else -> Array(1) { Array(17) { FloatArray(3) } }
     }
 }

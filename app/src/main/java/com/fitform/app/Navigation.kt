@@ -62,7 +62,7 @@ fun FitFormNavHost(navController: NavHostController = rememberNavController()) {
                 mode = mode,
                 onExit = { navController.popBackStack() },
                 onSetComplete = { sessionId ->
-                    navController.navigate(Routes.summary(sessionId)) {
+                    navController.navigate(Routes.replay(sessionId)) {
                         popUpTo(Routes.HOME)
                     }
                 },
