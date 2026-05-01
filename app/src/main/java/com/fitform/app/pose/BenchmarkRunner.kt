@@ -13,6 +13,17 @@ import java.nio.ByteOrder
 
 enum class PowerTier { LOW, MEDIUM, HIGH }
 
+enum class BenchmarkPhase(val statusText: String, val logMessage: String) {
+    NPU_START("Running NPU…", "NPU benchmark started"),
+    NPU_DONE("NPU complete", "NPU benchmark completed"),
+    NPU_SKIPPED("NPU unavailable on emulator", "NPU benchmark skipped (emulator)"),
+    GPU_START("Running GPU…", "GPU benchmark started"),
+    GPU_DONE("GPU complete", "GPU benchmark completed"),
+    GPU_UNAVAILABLE("GPU unavailable", "GPU unavailable"),
+    CPU_START("Running CPU…", "CPU benchmark started"),
+    CPU_DONE("CPU complete", "CPU benchmark completed"),
+}
+
 data class BackendResult(
     val name: String,
     val avgMs: Long,
@@ -43,6 +54,7 @@ object BenchmarkRunner {
     suspend fun run(
         context: Context,
         isEmulator: Boolean = false,
+        onPhase: (BenchmarkPhase) -> Unit = {},
     ): List<BackendResult> = withContext(Dispatchers.IO) {
         val assetExists = runCatching {
             context.assets.open(MODEL_FILE).use { it.read() }
@@ -60,9 +72,22 @@ object BenchmarkRunner {
 
         val buffer = FileUtil.loadMappedFile(context, MODEL_FILE)
         buildList {
-            add(if (isEmulator) emulatorNpuPlaceholder() else benchmarkNpu(buffer))
-            add(benchmarkGpu(buffer))
-            add(benchmarkCpu(buffer))
+            val npu = if (isEmulator) {
+                onPhase(BenchmarkPhase.NPU_SKIPPED)
+                emulatorNpuPlaceholder()
+            } else {
+                onPhase(BenchmarkPhase.NPU_START)
+                benchmarkNpu(buffer).also { onPhase(BenchmarkPhase.NPU_DONE) }
+            }
+            add(npu)
+
+            onPhase(BenchmarkPhase.GPU_START)
+            val gpu = benchmarkGpu(buffer)
+            onPhase(if (gpu.available) BenchmarkPhase.GPU_DONE else BenchmarkPhase.GPU_UNAVAILABLE)
+            add(gpu)
+
+            onPhase(BenchmarkPhase.CPU_START)
+            add(benchmarkCpu(buffer).also { onPhase(BenchmarkPhase.CPU_DONE) })
         }
     }
 

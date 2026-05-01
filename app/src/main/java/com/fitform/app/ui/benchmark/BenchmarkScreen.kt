@@ -17,24 +17,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fitform.app.pose.BackendResult
-import com.fitform.app.pose.BenchmarkRunner
+import com.fitform.app.pose.PerformanceRepository
 import com.fitform.app.pose.PowerTier
 import com.fitform.app.ui.components.GhostButton
+import com.fitform.app.ui.components.PrimaryButton
 import com.fitform.app.ui.components.SectionEyebrow
 import com.fitform.app.ui.components.TickerRule
 import com.fitform.app.ui.theme.FitFormColors
 import com.fitform.app.ui.theme.FitFormType
 import com.fitform.app.util.DeviceInfo
+import kotlinx.coroutines.launch
 
 @Composable
 fun BenchmarkScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val isEmulator = remember { DeviceInfo.isProbablyEmulator() }
-    var results by remember { mutableStateOf<List<BackendResult>?>(null) }
+    val scope = rememberCoroutineScope()
+    val state by PerformanceRepository.state.collectAsState()
+    val isEmulator = state.isEmulator
+    val results = state.results
 
     LaunchedEffect(Unit) {
         DeviceInfo.logDeviceInfo()
-        results = BenchmarkRunner.run(context, isEmulator = isEmulator)
+        if (state.results == null && !state.isRunning) {
+            PerformanceRepository.runBenchmark(context)
+        }
     }
 
     Column(
@@ -117,7 +123,7 @@ fun BenchmarkScreen(onBack: () -> Unit) {
                     strokeWidth = 2.dp,
                 )
                 Text(
-                    "Warming up NPU execution plan…",
+                    state.statusText ?: "Warming up NPU execution plan…",
                     style = FitFormType.Body,
                     color = FitFormColors.Mute,
                 )
@@ -132,6 +138,37 @@ fun BenchmarkScreen(onBack: () -> Unit) {
             list.forEach { result ->
                 BackendBar(result = result, maxMs = maxMs)
                 Spacer(Modifier.height(12.dp))
+            }
+
+            Spacer(Modifier.height(20.dp))
+            PrimaryButton(
+                label = if (state.isRunning) "Running Benchmark…" else "Run Benchmark Again",
+                eyebrow = "PERFORMANCE LAB",
+                enabled = !state.isRunning,
+                onClick = {
+                    scope.launch { PerformanceRepository.runBenchmark(context) }
+                },
+            )
+            val statusText = state.statusText
+            if (statusText != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (state.isRunning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            color = FitFormColors.Acid,
+                            strokeWidth = 1.5.dp,
+                        )
+                    }
+                    Text(
+                        statusText,
+                        style = FitFormType.Caption,
+                        color = FitFormColors.Mute,
+                    )
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -269,9 +306,9 @@ private fun BackendBar(result: BackendResult, maxMs: Float) {
         if (result.available) {
             val fps = if (result.avgMs > 0) (1000f / result.avgMs).toInt() else 0
             val powerLabel = when (result.powerTier) {
-                PowerTier.LOW    -> "LOW POWER"
-                PowerTier.MEDIUM -> "MED POWER"
-                PowerTier.HIGH   -> "HIGH POWER"
+                PowerTier.LOW    -> "EST. LOW POWER"
+                PowerTier.MEDIUM -> "EST. MED POWER"
+                PowerTier.HIGH   -> "EST. HIGH POWER"
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
