@@ -86,6 +86,12 @@ val interpreter = Interpreter(
 )
 ```
 
+> **"But those imports say `org.tensorflow.lite.*` — isn't that TensorFlow Lite?"**
+>
+> No. The Maven artifact is `com.google.ai.edge.litert:litert:1.0.1` — confirmed in [`gradle/libs.versions.toml`](gradle/libs.versions.toml) and `app/build.gradle.kts`. That's **LiteRT**, the Google AI Edge runtime, the production successor to TFLite.
+>
+> When Google rebranded TFLite → LiteRT in 2024, they preserved the entire public API surface (`Interpreter`, `NnApiDelegate`, `FileUtil`, etc.) under the legacy `org.tensorflow.lite.*` package names so existing TFLite Android apps could migrate to LiteRT by changing **one line of `build.gradle`** — zero code changes. Google publicly calls this *drop-in compatibility*. The class names look like TFLite by design; the bytecode and runtime are LiteRT.
+
 **Why LiteRT makes NPU easy:** There is no Qualcomm QNN SDK to learn, no Hexagon-specific APIs to call, no model recompilation needed. Drop in a `.tflite` file, add `NnApiDelegate()`, and Android Neural Networks API (NNAPI) automatically routes ops to the Snapdragon Hexagon DSP. LiteRT is the bridge between your model and the best available hardware.
 
 **Fallback chain (production-ready):**
