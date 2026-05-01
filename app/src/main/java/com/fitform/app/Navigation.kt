@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.fitform.app.model.ExerciseMode
+import com.fitform.app.ui.benchmark.BenchmarkScreen
 import com.fitform.app.ui.history.HistoryScreen
 import com.fitform.app.ui.home.HomeScreen
 import com.fitform.app.ui.live.LiveCoachScreen
@@ -22,6 +23,7 @@ object Routes {
     const val SUMMARY = "summary/{sessionId}"
     const val HISTORY = "history"
     const val REPLAY = "replay/{sessionId}"
+    const val BENCHMARK = "benchmark"
 
     fun setup(mode: ExerciseMode) = "setup/${mode.routeKey}"
     fun live(mode: ExerciseMode) = "live/${mode.routeKey}"
@@ -37,6 +39,7 @@ fun FitFormNavHost(navController: NavHostController = rememberNavController()) {
                 onGymCoach = { navController.navigate(Routes.setup(ExerciseMode.GYM)) },
                 onShotCoach = { navController.navigate(Routes.setup(ExerciseMode.SHOT)) },
                 onHistory = { navController.navigate(Routes.HISTORY) },
+                onBenchmark = { navController.navigate(Routes.BENCHMARK) },
             )
         }
         composable(
@@ -91,6 +94,9 @@ fun FitFormNavHost(navController: NavHostController = rememberNavController()) {
                 sessionId = sessionId,
                 onBack = { navController.popBackStack() },
             )
+        }
+        composable(Routes.BENCHMARK) {
+            BenchmarkScreen(onBack = { navController.popBackStack() })
         }
     }
 }

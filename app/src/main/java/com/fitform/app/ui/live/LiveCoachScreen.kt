@@ -153,10 +153,11 @@ fun LiveCoachScreen(
 
 @Composable
 private fun ModelChip(state: LiveCoachUiState) {
+    val ms = if (state.inferenceMs > 0) "${state.inferenceMs}ms · " else ""
     val (label, color) = when (state.modelKind) {
-        ModelKind.LiteRtNpu -> "LITERT · NPU" to FitFormColors.Acid
-        ModelKind.LiteRtCpu -> "LITERT · CPU" to FitFormColors.StatusAmber
-        ModelKind.Mock       -> "MOCK MODEL"   to FitFormColors.Mute
+        ModelKind.LiteRtNpu -> "${ms}NPU" to FitFormColors.Acid
+        ModelKind.LiteRtCpu -> "${ms}CPU" to FitFormColors.StatusAmber
+        ModelKind.Mock       -> "MOCK"    to FitFormColors.Mute
     }
     Row(
         modifier = Modifier

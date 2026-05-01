@@ -61,6 +61,9 @@ class LiteRtPoseEstimator private constructor(
 
     private val outputBuffer = Array(1) { Array(1) { Array(KeypointIndex.COUNT) { FloatArray(3) } } }
 
+    // Most recent inference latency — read by LiveCoachViewModel each frame for the HUD chip.
+    @Volatile var lastInferenceMs: Long = 0L
+
     // Perf tracking — accumulated across frames, single-threaded via LiveCoachViewModel's Mutex.
     private var frameCount = 0
     private var rollingTotalMs = 0L
@@ -94,6 +97,7 @@ class LiteRtPoseEstimator private constructor(
             val inferenceStart = SystemClock.elapsedRealtime()
             interpreter.run(inputBuffer, outputBuffer)
             val inferenceMs = SystemClock.elapsedRealtime() - inferenceStart
+            lastInferenceMs = inferenceMs
 
             frameCount++
             rollingTotalMs += inferenceMs

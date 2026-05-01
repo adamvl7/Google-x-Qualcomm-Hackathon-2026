@@ -101,6 +101,9 @@ class SessionRecorder(
                             if (kp.confidence >= 0.3f) put(KeypointIndex.NAMES[i], kp)
                         }
                     },
+                    score = result.score,
+                    cue = result.cue,
+                    severity = result.severity,
                 )
             )
         }

@@ -83,6 +83,7 @@ dependencies {
     // LiteRT (Google AI Edge)
     implementation(libs.litert.core)
     implementation(libs.litert.support)
+    implementation(libs.litert.gpu)
 
     // ExoPlayer for replay
     implementation(libs.media3.exoplayer)
@@ -94,4 +95,5 @@ dependencies {
 
     // Permissions
     implementation(libs.accompanist.permissions)
+
 }

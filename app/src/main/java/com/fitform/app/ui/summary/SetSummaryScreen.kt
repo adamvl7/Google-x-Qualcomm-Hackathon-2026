@@ -69,7 +69,6 @@ fun SetSummaryScreen(
 
         Spacer(Modifier.height(28.dp))
 
-        // Hero stats — score on the left, rep count on the right
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -126,6 +125,8 @@ fun SetSummaryScreen(
         GhostButton(label = "Back to Home", onClick = onHome)
     }
 }
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 @Composable
 private fun HeroStat(eyebrow: String, value: String, suffix: String?, accent: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {

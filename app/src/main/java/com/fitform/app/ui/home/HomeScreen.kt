@@ -27,6 +27,7 @@ fun HomeScreen(
     onGymCoach: () -> Unit,
     onShotCoach: () -> Unit,
     onHistory: () -> Unit,
+    onBenchmark: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -116,6 +117,8 @@ fun HomeScreen(
         Spacer(Modifier.height(20.dp))
 
         GhostButton(label = "View Session History", onClick = onHistory)
+        Spacer(Modifier.height(8.dp))
+        GhostButton(label = "Run NPU Benchmark →", onClick = onBenchmark)
 
         Spacer(Modifier.weight(1f, fill = false))
         Spacer(Modifier.height(40.dp))

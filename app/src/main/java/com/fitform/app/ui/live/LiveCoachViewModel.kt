@@ -37,6 +37,9 @@ import kotlinx.coroutines.withContext
  * FeedbackEngine blends rule-based geometry scores with the optional
  * FormClassifier (second LiteRT model on NPU) for calibrated form scoring.
  * Rep boundaries are detected automatically by [RepDetector].
+ *
+ * Shot mode uses a faster EMA and shorter cue debounce than squat mode because
+ * a jump shot lasts ~0.7 s and needs immediate feedback before it's over.
  */
 class LiveCoachViewModel(
     private val app: Application,
@@ -85,12 +88,17 @@ class LiveCoachViewModel(
     private val analysisMutex = Mutex()
     private var lastResult: AnalysisResult? = null
 
-    // ── Display smoothing ─────────────────────────────────────────────────────
-    private var smoothedScore = 100f
+    // ── Score smoothing (EMA) ─────────────────────────────────────────────────
+    // Shot mode uses a higher alpha (0.28) so the score updates fast enough to
+    // be meaningful during a ~0.7 s jump shot. Squat mode uses 0.15 for
+    // steadier display during a slower ~2-3 s movement.
+    private val scoreEmaAlpha  = if (mode == ExerciseMode.SHOT) 0.28f else 0.15f
+    private val scoreEmaRetain = 1f - scoreEmaAlpha
+    private var smoothedScore  = 100f
 
-    // Cue debounce: a new cue must persist for severity.holdMs() before it
-    // replaces the displayed cue. GREEN cues are shown instantly (0 ms) to
-    // reward correct form immediately; error cues are debounced to prevent flicker.
+    // ── Cue debounce ─────────────────────────────────────────────────────────
+    // Shot: shorter holds so form cues appear within the shot window.
+    // Squat: standard holds for stability during slower reps.
     private var pendingCue = ""
     private var pendingSeverity = Severity.GREEN
     private var pendingCueFirstSeenMs = 0L
@@ -135,9 +143,9 @@ class LiveCoachViewModel(
                     repDetector.onFrame(result)
                 }
 
-                // ── Score smoothing (EMA) ─────────────────────────────────────
+                // ── Score smoothing ───────────────────────────────────────────
                 if (result.tracking) {
-                    smoothedScore = smoothedScore * SCORE_EMA_RETAIN + result.score * SCORE_EMA_ALPHA
+                    smoothedScore = smoothedScore * scoreEmaRetain + result.score * scoreEmaAlpha
                 }
                 val stableScore = smoothedScore.toInt().coerceIn(0, 100)
 
@@ -153,6 +161,7 @@ class LiveCoachViewModel(
                     displayedSeverity = pendingSeverity
                 }
 
+                val inferenceMs = (poseEstimator as? LiteRtPoseEstimator)?.lastInferenceMs?.toInt() ?: 0
                 _uiState.update { state ->
                     state.copy(
                         pose = result.pose,
@@ -160,6 +169,7 @@ class LiveCoachViewModel(
                         cue = displayedCue,
                         severity = displayedSeverity,
                         tracking = result.tracking,
+                        inferenceMs = inferenceMs,
                     )
                 }
             }
@@ -191,20 +201,13 @@ class LiveCoachViewModel(
         try { poseEstimator?.close() } catch (_: Throwable) {}
         cameraManager.shutdown()
     }
-}
 
-// ── Score smoothing constants ─────────────────────────────────────────────────
-private const val SCORE_EMA_ALPHA  = 0.15f
-private const val SCORE_EMA_RETAIN = 1f - SCORE_EMA_ALPHA
-
-// ── Per-severity cue debounce ─────────────────────────────────────────────────
-// GREEN: instant — reward correct form with no delay.
-// YELLOW: 450 ms — debounce caution cues to avoid flicker at threshold edges.
-// RED: 600 ms — debounce error cues most heavily; they're the most alarming.
-private fun Severity.holdMs(): Long = when (this) {
-    Severity.GREEN  -> 0L
-    Severity.YELLOW -> 450L
-    Severity.RED    -> 600L
+    // Per-severity + per-mode cue debounce hold times.
+    private fun Severity.holdMs(): Long = when (this) {
+        Severity.GREEN  -> 0L
+        Severity.YELLOW -> if (mode == ExerciseMode.SHOT) 180L else 450L
+        Severity.RED    -> if (mode == ExerciseMode.SHOT) 300L else 600L
+    }
 }
 
 enum class ModelKind { LiteRtNpu, LiteRtCpu, Mock }
@@ -222,4 +225,5 @@ data class LiveCoachUiState(
     val lastRepScore: Int? = null,
     val lastRepCue: String? = null,
     val modelKind: ModelKind = ModelKind.Mock,
+    val inferenceMs: Int = 0,
 )

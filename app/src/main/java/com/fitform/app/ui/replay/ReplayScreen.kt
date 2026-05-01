@@ -21,17 +21,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.fitform.app.FitFormApp
-import com.fitform.app.model.PoseResult
 import com.fitform.app.model.RepData
-import com.fitform.app.model.SessionEvent
 import com.fitform.app.model.SessionSummary
 import com.fitform.app.model.Severity
 import com.fitform.app.replay.ReplayEngine
+import com.fitform.app.replay.ReplayFrame
+import com.fitform.app.ui.components.CueBanner
 import com.fitform.app.ui.components.PoseOverlay
+import com.fitform.app.ui.components.ScoreBadge
 import com.fitform.app.ui.components.SectionEyebrow
 import com.fitform.app.ui.components.TickerRule
 import com.fitform.app.ui.components.scoreColor
@@ -71,8 +71,9 @@ fun ReplayScreen(
         }
     }
 
-    val pose: PoseResult = engine?.poseAt(positionMs) ?: PoseResult.EMPTY
-    val activeEvent: SessionEvent? = engine?.activeEvent(positionMs)
+    // Per-frame data from stored analysis.json — exact stats from the live session.
+    val frame: ReplayFrame = engine?.frameAt(positionMs) ?: ReplayFrame.EMPTY
+    val showStats = frame.score > 0 || frame.cue.isNotEmpty()
 
     Column(
         modifier = Modifier
@@ -98,7 +99,7 @@ fun ReplayScreen(
             Text("REPLAY", style = FitFormType.LabelLg, color = FitFormColors.Acid)
         }
 
-        // video + overlay
+        // ── Video + live overlay ──────────────────────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -119,50 +120,61 @@ fun ReplayScreen(
                 update = { it.player = player },
                 modifier = Modifier.fillMaxSize(),
             )
+
+            // Skeleton overlay using stored keypoints — same data that was shown live
             PoseOverlay(
-                pose = pose,
-                severity = activeEvent?.severity ?: Severity.GREEN,
+                pose = frame.pose,
+                severity = frame.severity,
                 modifier = Modifier.fillMaxSize(),
                 mirror = false,
             )
-            // active cue chip
-            if (activeEvent != null) {
-                Box(
+
+            // Score badge — updates frame-by-frame with stored score
+            if (showStats) {
+                ScoreBadge(
+                    score = frame.score,
+                    paused = false,
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(16.dp)
-                        .background(FitFormColors.Surface.copy(alpha = 0.85f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            Modifier
-                                .size(8.dp)
-                                .background(when (activeEvent.severity) {
-                                    Severity.GREEN -> FitFormColors.StatusGreen
-                                    Severity.YELLOW -> FitFormColors.StatusAmber
-                                    Severity.RED -> FitFormColors.StatusRed
-                                })
-                        )
-                        Text(activeEvent.cue.uppercase(), style = FitFormType.Eyebrow, color = FitFormColors.Bone)
-                    }
-                }
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp),
+                )
             }
         }
 
+        // ── Cue banner — updates frame-by-frame with stored cue ───────────────
+        if (showStats && frame.cue.isNotEmpty()) {
+            CueBanner(
+                cue = frame.cue,
+                severity = frame.severity,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         val s = summary ?: return
-        // summary band
-        Column(modifier = Modifier
-            .padding(horizontal = 24.dp, vertical = 20.dp),
+        // ── Session summary band ──────────────────────────────────────────────
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .padding(top = if (showStats && frame.cue.isNotEmpty()) 8.dp else 16.dp, bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
+            ) {
                 Column {
-                    Text(if (s.mode == "gym") "SQUAT" else "JUMP SHOT", style = FitFormType.DisplayMd, color = FitFormColors.Bone)
+                    Text(
+                        text = if (s.mode == "gym") "SQUAT" else "JUMP SHOT",
+                        style = FitFormType.DisplayMd,
+                        color = FitFormColors.Bone,
+                    )
                     Text(s.createdAt, style = FitFormType.Caption, color = FitFormColors.Mute)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("${s.averageScore}%", style = FitFormType.DisplayMd, color = scoreColor(s.averageScore))
+                    Text("${s.averageScore}% AVG", style = FitFormType.LabelLg, color = scoreColor(s.averageScore))
                     Text("${s.repCount} REPS", style = FitFormType.Eyebrow, color = FitFormColors.Mute)
                 }
             }
@@ -171,14 +183,11 @@ fun ReplayScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 240.dp),
+                    .heightIn(max = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(s.reps, key = { it.repNumber }) { rep ->
                     TimelineRepRow(rep = rep, onSeek = { player.seekTo(rep.startTimestampMs) })
-                }
-                items(s.events) { event ->
-                    EventRow(event)
                 }
             }
         }
@@ -199,28 +208,6 @@ private fun TimelineRepRow(rep: RepData, onSeek: () -> Unit) {
         Text("REP ${rep.repNumber.toString().padStart(2, '0')}", style = FitFormType.Eyebrow, color = FitFormColors.Acid)
         Text(rep.topCue, style = FitFormType.Body, color = FitFormColors.Bone, modifier = Modifier.weight(1f))
         Text("${rep.score}%", style = FitFormType.LabelLg, color = scoreColor(rep.score))
-    }
-}
-
-@Composable
-private fun EventRow(event: SessionEvent) {
-    val color = when (event.severity) {
-        Severity.GREEN -> FitFormColors.StatusGreen
-        Severity.YELLOW -> FitFormColors.StatusAmber
-        Severity.RED -> FitFormColors.StatusRed
-    }
-    Row(
-        modifier = Modifier.padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(
-            Modifier
-                .size(width = 6.dp, height = 18.dp)
-                .background(color)
-        )
-        Text(formatMs(event.timestampMs), style = FitFormType.Stat, color = FitFormColors.Faint)
-        Text(event.cue, style = FitFormType.Caption, color = FitFormColors.Mute)
     }
 }
 
