@@ -207,9 +207,9 @@ We evaluated several pose estimators (Mediapipe BlazePose, MoveNet Thunder, Move
 
 "Fine-tuning" here means the biomechanics thresholds inside [`SquatAnalyzer`](app/src/main/java/com/fitform/app/analysis/squat/SquatAnalyzer.kt) and [`ShotAnalyzer`](app/src/main/java/com/fitform/app/analysis/shot/ShotAnalyzer.kt) — not gradient descent on the model itself. Squat depth (>110°), forward knee travel (>0.10 normalized), trunk lean (>45°), elbow alignment (>0.08), follow-through (<140°): every threshold was iterated against real squat and shot videos until the cues fired when form actually broke and stayed silent when it didn't. The difference between "the model sees the joints" and "the coaching feels right" lives entirely in this table.
 
-### 3. Routing inference to Hexagon, not silently to CPU
+### 3. Getting the app onto the Galaxy S25 Ultra in the first place
 
-Adding `addDelegate(NnApiDelegate())` is one line; making sure it actually lands on the Hexagon NPU instead of silently falling back to CPU took device-specific debugging. INT8 quantization had to match what the NNAPI driver accepts, the fallback chain (NPU → CPU → MockPoseEstimator) had to be wired so no path crashes the app, and we had to log the active backend so we could *prove* the route at runtime — `adb logcat -s FitForm/LiteRT` will show `backend=NNAPI/NPU` or the fallback in plain text.
+The S25 Ultra was our target device but wasn't always physically available during development. The day-to-day loop was: code → run on the **Android Studio emulator** (AVD, x86_64) → flash to the S25 Ultra whenever the device was free → confirm the NNAPI path actually routed to Hexagon (`adb logcat -s FitForm/LiteRT` showing `backend=NNAPI/NPU`). The emulator gives you a working camera and Compose UI, but it has no Hexagon NPU — so any "benchmark numbers" it produces are fiction. That gap is exactly what motivated problem 6.
 
 ### 4. Cold-start latency hiding the real performance
 
@@ -221,7 +221,7 @@ CameraX delivers frames faster than inference can consume them on slower fallbac
 
 ### 6. Honesty about hardware that isn't there
 
-Two related problems, one principle: never present made-up numbers as real. The `litert-gpu` native libraries aren't shipped with every Android build, so we load the GPU delegate via reflection — its absence degrades to CPU instead of crashing the benchmark. Separately, the Performance Lab uses [`DeviceInfo.isProbablyEmulator()`](app/src/main/java/com/fitform/app/util/DeviceInfo.kt) to detect emulator runs and visibly mark the Hexagon NPU bar as "Unavailable on emulator" rather than letting `BackendResult` numbers from a virtual device read like a Snapdragon benchmark. The **Run Benchmark Again** button on a real S25 Ultra is what proves the real numbers — judges can tap it live.
+Two consequences of the emulator-driven workflow in problem 3, one principle: never let made-up numbers leave the screen as if they were real. We load the GPU delegate via reflection so a missing `litert-gpu` native library degrades to CPU rather than crashing the benchmark. And the Performance Lab uses [`DeviceInfo.isProbablyEmulator()`](app/src/main/java/com/fitform/app/util/DeviceInfo.kt) to detect emulator runs and visibly mark the Hexagon NPU bar as "Unavailable on emulator" — anyone running the APK in an AVD sees that bar greyed out with a pointer to the S25 Ultra, instead of `BackendResult` numbers from a virtual device reading like a Snapdragon benchmark. The **Run Benchmark Again** button on a real S25 Ultra is what proves the real numbers — judges can tap it live.
 
 ---
 
