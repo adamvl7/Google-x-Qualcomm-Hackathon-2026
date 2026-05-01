@@ -12,7 +12,7 @@
 
 | Name             | Email |
 |------------------|------------|
-| Adam Le          | adam.le.7184@gmail.com |  <img width="497" height="498" alt="peter-griffin-basketball" src="https://github.com/user-attachments/assets/17466510-2795-46ae-8364-e6ee3d5e59af" />
+| Adam Le          | adam.le.7184@gmail.com |
 | Kevin Chhim      | kevinlychhim@gmail.com |
 | Ryan Ong         |  riannongg@gmail.com   |
 
