@@ -10,12 +10,11 @@
 
 ## Team
 
-| Name | Email |
-
-| Adam Le | adam.le.7184@gmail.com |
-| Kevin Chhim | kevinlyc@uci.edu |
-| Ryan Ong | riannongg@gmail.com |
-
+| Name             | Email |
+|------------------|------------|
+| Adam Le          | adam.le.7184@gmail.com | 
+| Kevin Chhim      | kevinlychhim@gmail.com |
+| Ryan Ong         |  riannongg@gmail.com   |
 
 ---
 
