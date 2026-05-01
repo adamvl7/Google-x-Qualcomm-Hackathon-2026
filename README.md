@@ -201,7 +201,7 @@ FitForm/LiteRT  [NPU/NNAPI] frame=60  last=5ms  avg=6ms
 - Android SDK 34
 - Samsung Galaxy S25 Ultra or any Snapdragon device running Android 9+
 
-> Emulators do not have camera access or NPU hardware. Run on a physical device.
+> Emulators do not have camera access or NPU hardware. Run on a physical device. The Performance Lab screen detects emulator runs via `Build` properties, swaps the device chip to "Emulator · UI test mode", shows a warning that emulator results are not representative, and marks the Hexagon NPU bar as "Unavailable on emulator" with a pointer to run on the Galaxy S25 Ultra. Physical-device runs (S25 Ultra and others) show real benchmark numbers unchanged.
 
 ### 1. Clone & Open
 
@@ -331,6 +331,7 @@ Score < 70 escalates severity from YELLOW → RED. Rep score = frame-average acr
 | Set Summary | `summary/{sessionId}` | Per-rep breakdown + top corrections |
 | History | `history` | All past sessions as cards |
 | Replay | `replay/{sessionId}` | Video + synchronized skeleton overlay |
+| Performance Lab | `benchmark` | Live CPU/GPU/NPU latency benchmark + emulator detection |
 
 ---
 
@@ -371,12 +372,13 @@ Score < 70 escalates severity from YELLOW → RED. Rep score = frame-average acr
 ```
 app/src/main/java/com/fitform/app/
 ├── model/        Keypoint, PoseResult, SessionSummary, RepData, FrameData…
-├── pose/         PoseEstimator (interface) · LiteRtPoseEstimator · MockPoseEstimator
+├── pose/         PoseEstimator (interface) · LiteRtPoseEstimator · MockPoseEstimator · BenchmarkRunner
 ├── analysis/     GeometryUtils · SquatAnalyzer · ShotAnalyzer · FeedbackEngine
 ├── camera/       CameraManager (CameraX) · CameraPreviewView
 ├── recording/    SessionRecorder (VideoCapture + JSON accumulation)
 ├── storage/      SessionStorage · SessionRepository
 ├── replay/       ReplayEngine (binary search frame lookup)
+├── util/         DeviceInfo (emulator detection, device chip label)
 └── ui/
     ├── theme/    FitFormTheme · Color · Type (Anton · Manrope · JetBrains Mono)
     ├── components/ PoseOverlay · ScoreBadge · CueBanner · Buttons · BrandChrome
@@ -385,7 +387,8 @@ app/src/main/java/com/fitform/app/
     ├── live/     LiveCoachScreen + LiveCoachViewModel
     ├── summary/  SetSummaryScreen
     ├── history/  HistoryScreen
-    └── replay/   ReplayScreen
+    ├── replay/   ReplayScreen
+    └── benchmark/ BenchmarkScreen (Performance Lab)
 ```
 
 ---
