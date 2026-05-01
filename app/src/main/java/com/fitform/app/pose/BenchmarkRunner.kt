@@ -19,6 +19,8 @@ data class BackendResult(
     val minMs: Long,
     val available: Boolean,
     val powerTier: PowerTier,
+    val subtitle: String? = null,
+    val note: String? = null,
 )
 
 /**
@@ -38,7 +40,10 @@ object BenchmarkRunner {
     private const val TIMED_RUNS = 30
     private const val INPUT_BYTES = 1 * 192 * 192 * 3 * 4  // float32
 
-    suspend fun run(context: Context): List<BackendResult> = withContext(Dispatchers.IO) {
+    suspend fun run(
+        context: Context,
+        isEmulator: Boolean = false,
+    ): List<BackendResult> = withContext(Dispatchers.IO) {
         val assetExists = runCatching {
             context.assets.open(MODEL_FILE).use { it.read() }
             true
@@ -47,7 +52,7 @@ object BenchmarkRunner {
         if (!assetExists) {
             Log.w(TAG, "$MODEL_FILE missing — cannot benchmark")
             return@withContext listOf(
-                BackendResult("NPU (Hexagon DSP)", 0L, 0L, false, PowerTier.LOW),
+                BackendResult("Hexagon NPU", 0L, 0L, false, PowerTier.LOW, subtitle = "via NNAPI delegate"),
                 BackendResult("GPU", 0L, 0L, false, PowerTier.MEDIUM),
                 BackendResult("CPU (4 threads)", 0L, 0L, false, PowerTier.HIGH),
             )
@@ -55,11 +60,21 @@ object BenchmarkRunner {
 
         val buffer = FileUtil.loadMappedFile(context, MODEL_FILE)
         buildList {
-            add(benchmarkNpu(buffer))
+            add(if (isEmulator) emulatorNpuPlaceholder() else benchmarkNpu(buffer))
             add(benchmarkGpu(buffer))
             add(benchmarkCpu(buffer))
         }
     }
+
+    private fun emulatorNpuPlaceholder(): BackendResult = BackendResult(
+        name = "Hexagon NPU",
+        avgMs = 0L,
+        minMs = 0L,
+        available = false,
+        powerTier = PowerTier.LOW,
+        subtitle = "Unavailable on emulator",
+        note = "Run on Galaxy S25 Ultra for real NPU benchmark.",
+    )
 
     private fun benchmarkNpu(buffer: java.nio.MappedByteBuffer): BackendResult {
         var nnApi: NnApiDelegate? = null
@@ -71,10 +86,10 @@ object BenchmarkRunner {
             }
             val (avg, min) = timeInterpreter(buffer, opts)
             Log.i(TAG, "NPU avg=${avg}ms min=${min}ms")
-            BackendResult("NPU (Hexagon DSP)", avg, min, true, PowerTier.LOW)
+            BackendResult("Hexagon NPU", avg, min, true, PowerTier.LOW, subtitle = "via NNAPI delegate")
         } catch (t: Throwable) {
             Log.w(TAG, "NPU benchmark failed: ${t.message}")
-            BackendResult("NPU (Hexagon DSP)", 0L, 0L, false, PowerTier.LOW)
+            BackendResult("Hexagon NPU", 0L, 0L, false, PowerTier.LOW, subtitle = "via NNAPI delegate")
         } finally {
             runCatching { nnApi?.close() }
         }

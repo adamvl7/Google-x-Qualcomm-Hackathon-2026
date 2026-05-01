@@ -24,14 +24,17 @@ import com.fitform.app.ui.components.SectionEyebrow
 import com.fitform.app.ui.components.TickerRule
 import com.fitform.app.ui.theme.FitFormColors
 import com.fitform.app.ui.theme.FitFormType
+import com.fitform.app.util.DeviceInfo
 
 @Composable
 fun BenchmarkScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val isEmulator = remember { DeviceInfo.isProbablyEmulator() }
     var results by remember { mutableStateOf<List<BackendResult>?>(null) }
 
     LaunchedEffect(Unit) {
-        results = BenchmarkRunner.run(context)
+        DeviceInfo.logDeviceInfo()
+        results = BenchmarkRunner.run(context, isEmulator = isEmulator)
     }
 
     Column(
@@ -57,6 +60,47 @@ fun BenchmarkScreen(onBack: () -> Unit) {
             style = FitFormType.Caption,
             color = FitFormColors.Mute,
         )
+
+        Spacer(Modifier.height(12.dp))
+        // Device chip
+        val chipColor = if (isEmulator) FitFormColors.StatusAmber else FitFormColors.Acid
+        Row(
+            modifier = Modifier
+                .background(FitFormColors.SurfaceHigh)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(Modifier.size(4.dp).background(chipColor))
+            Text(
+                DeviceInfo.deviceChipLabel(),
+                style = FitFormType.Caption,
+                color = chipColor,
+            )
+        }
+
+        if (isEmulator) {
+            Spacer(Modifier.height(12.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(FitFormColors.Surface)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "EMULATOR · UI TEST MODE",
+                    style = FitFormType.Eyebrow,
+                    color = FitFormColors.StatusAmber,
+                )
+                Text(
+                    "Emulator results are for UI/build testing only and do not " +
+                        "represent Snapdragon Hexagon NPU performance.",
+                    style = FitFormType.Caption,
+                    color = FitFormColors.Mute,
+                )
+            }
+        }
 
         Spacer(Modifier.height(28.dp))
         TickerRule()
@@ -89,6 +133,34 @@ fun BenchmarkScreen(onBack: () -> Unit) {
                 BackendBar(result = result, maxMs = maxMs)
                 Spacer(Modifier.height(12.dp))
             }
+
+            Spacer(Modifier.height(24.dp))
+            // Latency explanation
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(FitFormColors.Surface)
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Live camera target: 30 FPS",
+                    style = FitFormType.LabelLg,
+                    color = FitFormColors.Acid,
+                )
+                Text(
+                    "For this small INT8 pose model, CPU and NPU latency can look similar in a short benchmark. The advantage of the Snapdragon Hexagon NPU is sustained low-power inference during continuous camera use.",
+                    style = FitFormType.Body,
+                    color = FitFormColors.Mute,
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            TickerRule()
+            Spacer(Modifier.height(24.dp))
+
+            // Why NPU Wins card
+            WhyNpuWinsCard()
 
             Spacer(Modifier.height(32.dp))
             TickerRule()
@@ -156,7 +228,16 @@ private fun BackendBar(result: BackendResult, maxMs: Float) {
                         .size(6.dp)
                         .background(if (result.available) tierColor else FitFormColors.Faint)
                 )
-                Text(result.name, style = FitFormType.LabelLg, color = FitFormColors.Bone)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(result.name, style = FitFormType.LabelLg, color = FitFormColors.Bone)
+                    if (result.subtitle != null) {
+                        Text(
+                            result.subtitle,
+                            style = FitFormType.Caption,
+                            color = FitFormColors.Faint,
+                        )
+                    }
+                }
             }
             if (result.available) {
                 Text(
@@ -192,8 +273,21 @@ private fun BackendBar(result: BackendResult, maxMs: Float) {
                 PowerTier.MEDIUM -> "MED POWER"
                 PowerTier.HIGH   -> "HIGH POWER"
             }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "~$fps inferences/sec synthetic benchmark",
+                    style = FitFormType.Caption,
+                    color = FitFormColors.Faint,
+                )
+                Text(
+                    "$powerLabel",
+                    style = FitFormType.Caption,
+                    color = FitFormColors.Faint,
+                )
+            }
+        } else if (result.note != null) {
             Text(
-                "~${fps} FPS  ·  $powerLabel",
+                result.note,
                 style = FitFormType.Caption,
                 color = FitFormColors.Faint,
             )
@@ -278,6 +372,42 @@ private fun PipelineCard() {
                     Text(name, style = FitFormType.LabelLg, color = FitFormColors.Bone)
                     Text(desc, style = FitFormType.Caption, color = FitFormColors.Mute)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhyNpuWinsCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(FitFormColors.Surface)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.size(6.dp).background(FitFormColors.Acid))
+            Text(
+                "WHY NPU WINS",
+                style = FitFormType.Eyebrow,
+                color = FitFormColors.Acid,
+            )
+        }
+        
+        val items = listOf(
+            Pair("CPU", "Fast fallback, higher power under sustained load"),
+            Pair("GPU", "Unavailable on this build/device path"),
+            Pair("NPU", "Optimized for efficient continuous AI inference"),
+        )
+        
+        items.forEach { (label, desc) ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, style = FitFormType.LabelLg, color = FitFormColors.Bone)
+                Text(desc, style = FitFormType.Caption, color = FitFormColors.Mute)
             }
         }
     }
