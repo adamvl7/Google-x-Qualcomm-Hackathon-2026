@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m 'Add Run Benchmark Again button + shared PerformanceRepository *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
