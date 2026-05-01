@@ -197,7 +197,7 @@ FitForm/LiteRT  [NPU/NNAPI] frame=60  last=5ms  avg=6ms
 
 > **Rubric alignment:** Technological Implementation — engineering judgment under real hardware constraints.
 
-The interesting parts of building FitForm weren't the happy paths. Six concrete obstacles shaped the architecture you see in the rest of this README:
+The interesting parts of building FitForm weren't the happy paths. Three concrete obstacles shaped the architecture you see in the rest of this README:
 
 ### 1. Picking the right pose model
 
@@ -210,18 +210,6 @@ We evaluated several pose estimators (Mediapipe BlazePose, MoveNet Thunder, Move
 ### 3. Getting the app onto the Galaxy S25 Ultra in the first place
 
 The S25 Ultra was our target device but wasn't always physically available during development. The day-to-day loop was: code → run on the **Android Studio emulator** (AVD, x86_64) → flash to the S25 Ultra whenever the device was free → confirm the NNAPI path actually routed to Hexagon (`adb logcat -s FitForm/LiteRT` showing `backend=NNAPI/NPU`). The emulator has no Hexagon NPU, so rather than fabricate NPU statistics, the Performance Lab calls [`DeviceInfo.isProbablyEmulator()`](app/src/main/java/com/fitform/app/util/DeviceInfo.kt) and marks the Hexagon NPU bar as "Unavailable on emulator." The CPU bar keeps running real measurements — and those numbers usefully approximate what a non-Snapdragon Android phone (no NPU) would experience, which is exactly the baseline the NPU path is meant to beat.
-
-### 4. Cold-start latency hiding the real performance
-
-The first inference on a fresh NNAPI interpreter triggers NPU model compilation and produces a 100–150ms spike on the first live frame. Without warmup, the first second of the camera feed lags visibly and any benchmark we showed judges would lie about steady-state performance. We pre-run **one dummy inference during interpreter construction** so the NPU execution plan is cached before the camera even starts — Logcat reports `warmup complete: ~110ms (NPU execution plan cached)` and live frames hit `~6–7ms` immediately afterwards.
-
-### 5. Frame backpressure at 30fps
-
-CameraX delivers frames faster than inference can consume them on slower fallback paths. Without intervention, frames queue, latency compounds, and the skeleton lags behind the athlete. Combining CameraX's `STRATEGY_KEEP_ONLY_LATEST` with a coroutine `Mutex` ensures only one frame is in-flight at any time, and any frames that arrive during inference are dropped rather than buffered. The UI is *always* showing the athlete's current pose, never one from 200ms ago.
-
-### 6. Honesty about hardware paths that aren't there
-
-The same principle from problem 3, applied to the GPU path: the `litert-gpu` native libraries aren't shipped with every Android build, and a missing native lib would otherwise crash the benchmark on launch. We load the GPU delegate via reflection so its absence degrades cleanly to CPU and the GPU bar simply renders as "UNAVAILABLE" instead of taking the app down. The **Run Benchmark Again** button on a real S25 Ultra is what proves the rest of the numbers — judges can tap it live and watch the phases (`NPU started → completed → GPU started → CPU complete`) cycle in a few seconds.
 
 ---
 
