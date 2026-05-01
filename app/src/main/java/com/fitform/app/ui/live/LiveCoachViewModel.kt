@@ -5,6 +5,7 @@ import androidx.camera.core.ImageProxy
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fitform.app.FitFormApp
+import com.fitform.app.analysis.FormClassifier
 import com.fitform.app.analysis.RepDetector
 import com.fitform.app.camera.CameraManager
 import com.fitform.app.feedback.FeedbackEngine
@@ -33,8 +34,9 @@ import kotlinx.coroutines.withContext
  *                                          ↓ (when set is in progress)
  *                                       SessionRecorder
  *
- * Rep boundaries are detected automatically by [RepDetector] — the user only
- * needs to press Start Set / End Set.
+ * FeedbackEngine blends rule-based geometry scores with the optional
+ * FormClassifier (second LiteRT model on NPU) for calibrated form scoring.
+ * Rep boundaries are detected automatically by [RepDetector].
  */
 class LiveCoachViewModel(
     private val app: Application,
@@ -84,11 +86,11 @@ class LiveCoachViewModel(
     private var lastResult: AnalysisResult? = null
 
     // ── Display smoothing ─────────────────────────────────────────────────────
-    // Score: exponential moving average — prevents score from bouncing frame-to-frame.
     private var smoothedScore = 100f
 
-    // Cue debounce: a new cue must persist for CUE_HOLD_MS before it replaces
-    // the displayed cue. Eliminates flickering at threshold boundaries.
+    // Cue debounce: a new cue must persist for severity.holdMs() before it
+    // replaces the displayed cue. GREEN cues are shown instantly (0 ms) to
+    // reward correct form immediately; error cues are debounced to prevent flicker.
     private var pendingCue = ""
     private var pendingSeverity = Severity.GREEN
     private var pendingCueFirstSeenMs = 0L
@@ -99,10 +101,14 @@ class LiveCoachViewModel(
         cameraManager.setAnalyzer { proxy -> processFrame(proxy) }
 
         viewModelScope.launch {
-            val estimator = withContext(Dispatchers.IO) {
-                LiteRtPoseEstimator.tryCreate(app) ?: MockPoseEstimator(mode)
+            val (estimator, classifier) = withContext(Dispatchers.IO) {
+                val est = LiteRtPoseEstimator.tryCreate(app) ?: MockPoseEstimator(mode)
+                val cls = FormClassifier.tryCreate(app, mode)
+                est to cls
             }
             poseEstimator = estimator
+            feedback.setClassifier(classifier)
+
             val kind = when {
                 estimator is LiteRtPoseEstimator && estimator.usingNnApi -> ModelKind.LiteRtNpu
                 estimator is LiteRtPoseEstimator -> ModelKind.LiteRtCpu
@@ -142,7 +148,7 @@ class LiveCoachViewModel(
                     pendingSeverity = result.severity
                     pendingCueFirstSeenMs = now
                 }
-                if (now - pendingCueFirstSeenMs >= CUE_HOLD_MS) {
+                if (now - pendingCueFirstSeenMs >= pendingSeverity.holdMs()) {
                     displayedCue = pendingCue
                     displayedSeverity = pendingSeverity
                 }
@@ -169,7 +175,6 @@ class LiveCoachViewModel(
 
     fun endSet(): String? {
         repDetector.active = false
-        // Close any rep that's still in progress.
         if (recorder.isActive && _uiState.value.repInProgress) {
             recorder.endRep(lastResult)
         }
@@ -188,9 +193,19 @@ class LiveCoachViewModel(
     }
 }
 
-private const val SCORE_EMA_ALPHA  = 0.15f          // how fast score responds to new frames
+// ── Score smoothing constants ─────────────────────────────────────────────────
+private const val SCORE_EMA_ALPHA  = 0.15f
 private const val SCORE_EMA_RETAIN = 1f - SCORE_EMA_ALPHA
-private const val CUE_HOLD_MS      = 600L           // ms a cue must persist before displaying
+
+// ── Per-severity cue debounce ─────────────────────────────────────────────────
+// GREEN: instant — reward correct form with no delay.
+// YELLOW: 450 ms — debounce caution cues to avoid flicker at threshold edges.
+// RED: 600 ms — debounce error cues most heavily; they're the most alarming.
+private fun Severity.holdMs(): Long = when (this) {
+    Severity.GREEN  -> 0L
+    Severity.YELLOW -> 450L
+    Severity.RED    -> 600L
+}
 
 enum class ModelKind { LiteRtNpu, LiteRtCpu, Mock }
 
