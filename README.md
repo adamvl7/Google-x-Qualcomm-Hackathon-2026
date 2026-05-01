@@ -231,21 +231,13 @@ git clone https://github.com/your-username/fitform.git
 
 Open the `FitForm/` directory in Android Studio. Gradle sync completes automatically.
 
-### 2. Add the Model (INT8 required for NPU efficiency)
+### 2. Model — Bundled, No Download Needed
 
-Download **MoveNet Lightning INT8**:
+The INT8 MoveNet Lightning model (~2.9 MB) is **already committed to the repo at `app/src/main/assets/movenet_lightning.tflite`** and packaged inside the APK at build time. Cloning the repo or installing the APK is all that's required — no separate download or manual placement step.
 
-```
-https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4
-```
-
-Place it at:
-
-```
-FitForm/app/src/main/assets/movenet_lightning.tflite
-```
-
-> **Without the model**, FitForm runs in demo mode with `MockPoseEstimator` — an animated skeleton that cycles through squat/shot poses. The full app UI works; the live screen shows "MOCK MODEL" in grey instead of "LITERT · NPU" in green.
+> **Swapping in a different variant?** Drop a replacement `.tflite` at `app/src/main/assets/movenet_lightning.tflite` (the asset path is hard-coded in `LiteRtPoseEstimator`). The reference Google Research download is [tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4](https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4).
+>
+> **If the asset is ever missing**, FitForm falls back to `MockPoseEstimator` — an animated skeleton that cycles through squat/shot poses. The full app UI works; the live screen shows "MOCK MODEL" in grey instead of "LITERT · NPU" in green.
 
 ### 3. Build & Run
 
@@ -420,7 +412,6 @@ app/src/main/java/com/fitform/app/
 - **Pose estimation only** — no ball tracking, wrist snap, or eye-on-rim analysis
 - **Single person** — MoveNet Lightning is single-pose; multi-person scenes may confuse keypoints
 - **Lighting sensitive** — performance degrades with poor lighting or keypoint occlusion
-- **Model not bundled** — `.tflite` file requires manual placement due to file size; see [Add the Model](#2-add-the-model-int8-required-for-npu-efficiency)
 
 ---
 
