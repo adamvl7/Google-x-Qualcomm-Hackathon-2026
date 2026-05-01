@@ -8,6 +8,14 @@
 
 ---
 
+## Team
+
+| Name | Email |
+
+| Adam Le | adam.le.7184@gmail.com |
+|Kevin Chhim|kevinlyc@uci.edu|
+|Ryan Ong|riannongg@gmail.com|
+
 ## What It Does
 
 FitForm gives athletes instant, private coaching feedback on two movements:
