@@ -201,7 +201,7 @@ FitForm/LiteRT  [NPU/NNAPI] frame=60  last=5ms  avg=6ms
 - Android SDK 34
 - Samsung Galaxy S25 Ultra or any Snapdragon device running Android 9+
 
-> Emulators do not have camera access or NPU hardware. Run on a physical device. The Performance Lab screen detects emulator runs via `Build` properties, swaps the device chip to "Emulator · UI test mode", shows a warning that emulator results are not representative, and marks the Hexagon NPU bar as "Unavailable on emulator" with a pointer to run on the Galaxy S25 Ultra. Physical-device runs (S25 Ultra and others) show real benchmark numbers unchanged.
+> Emulators do not have camera access or NPU hardware. Run on a physical device. The Performance Lab screen detects emulator runs via `Build` properties, swaps the device chip to "Emulator · UI test mode", shows a warning that emulator results are not representative, and marks the Hexagon NPU bar as "Unavailable on emulator" with a pointer to run on the Galaxy S25 Ultra. Physical-device runs (S25 Ultra and others) show real benchmark numbers unchanged. The screen also exposes a **Run Benchmark Again** button so judges can rerun the CPU/GPU/NPU comparison live; phase events (`NPU/GPU/CPU started`/`completed`, `GPU unavailable`, `Benchmark complete`) are surfaced in-app as a status caption and mirrored to Logcat under tag `PerformanceLab`. All readers (the screen, future localhost dashboard, etc.) consume the same `PerformanceRepository` `StateFlow`, so there's a single source of truth for the numbers.
 
 ### 1. Clone & Open
 
@@ -372,7 +372,7 @@ Score < 70 escalates severity from YELLOW → RED. Rep score = frame-average acr
 ```
 app/src/main/java/com/fitform/app/
 ├── model/        Keypoint, PoseResult, SessionSummary, RepData, FrameData…
-├── pose/         PoseEstimator (interface) · LiteRtPoseEstimator · MockPoseEstimator · BenchmarkRunner
+├── pose/         PoseEstimator (interface) · LiteRtPoseEstimator · MockPoseEstimator · BenchmarkRunner · PerformanceRepository
 ├── analysis/     GeometryUtils · SquatAnalyzer · ShotAnalyzer · FeedbackEngine
 ├── camera/       CameraManager (CameraX) · CameraPreviewView
 ├── recording/    SessionRecorder (VideoCapture + JSON accumulation)
