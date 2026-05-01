@@ -209,7 +209,7 @@ We evaluated several pose estimators (Mediapipe BlazePose, MoveNet Thunder, Move
 
 ### 3. Getting the app onto the Galaxy S25 Ultra in the first place
 
-The S25 Ultra was our target device but wasn't always physically available during development. The day-to-day loop was: code → run on the **Android Studio emulator** (AVD, x86_64) → flash to the S25 Ultra whenever the device was free → confirm the NNAPI path actually routed to Hexagon (`adb logcat -s FitForm/LiteRT` showing `backend=NNAPI/NPU`). The emulator gives you a working camera and Compose UI, but it has no Hexagon NPU — so any "benchmark numbers" it produces are fiction. That gap is exactly what motivated problem 6.
+The S25 Ultra was our target device but wasn't always physically available during development. The day-to-day loop was: code → run on the **Android Studio emulator** (AVD, x86_64) → flash to the S25 Ultra whenever the device was free → confirm the NNAPI path actually routed to Hexagon (`adb logcat -s FitForm/LiteRT` showing `backend=NNAPI/NPU`). The emulator has no Hexagon NPU, so rather than fabricate NPU statistics, the Performance Lab calls [`DeviceInfo.isProbablyEmulator()`](app/src/main/java/com/fitform/app/util/DeviceInfo.kt) and marks the Hexagon NPU bar as "Unavailable on emulator." The CPU bar keeps running real measurements — and those numbers usefully approximate what a non-Snapdragon Android phone (no NPU) would experience, which is exactly the baseline the NPU path is meant to beat.
 
 ### 4. Cold-start latency hiding the real performance
 
@@ -219,9 +219,9 @@ The first inference on a fresh NNAPI interpreter triggers NPU model compilation 
 
 CameraX delivers frames faster than inference can consume them on slower fallback paths. Without intervention, frames queue, latency compounds, and the skeleton lags behind the athlete. Combining CameraX's `STRATEGY_KEEP_ONLY_LATEST` with a coroutine `Mutex` ensures only one frame is in-flight at any time, and any frames that arrive during inference are dropped rather than buffered. The UI is *always* showing the athlete's current pose, never one from 200ms ago.
 
-### 6. Honesty about hardware that isn't there
+### 6. Honesty about hardware paths that aren't there
 
-Two consequences of the emulator-driven workflow in problem 3, one principle: never let made-up numbers leave the screen as if they were real. We load the GPU delegate via reflection so a missing `litert-gpu` native library degrades to CPU rather than crashing the benchmark. And the Performance Lab uses [`DeviceInfo.isProbablyEmulator()`](app/src/main/java/com/fitform/app/util/DeviceInfo.kt) to detect emulator runs and visibly mark the Hexagon NPU bar as "Unavailable on emulator" — anyone running the APK in an AVD sees that bar greyed out with a pointer to the S25 Ultra, instead of `BackendResult` numbers from a virtual device reading like a Snapdragon benchmark. The **Run Benchmark Again** button on a real S25 Ultra is what proves the real numbers — judges can tap it live.
+The same principle from problem 3, applied to the GPU path: the `litert-gpu` native libraries aren't shipped with every Android build, and a missing native lib would otherwise crash the benchmark on launch. We load the GPU delegate via reflection so its absence degrades cleanly to CPU and the GPU bar simply renders as "UNAVAILABLE" instead of taking the app down. The **Run Benchmark Again** button on a real S25 Ultra is what proves the rest of the numbers — judges can tap it live and watch the phases (`NPU started → completed → GPU started → CPU complete`) cycle in a few seconds.
 
 ---
 
