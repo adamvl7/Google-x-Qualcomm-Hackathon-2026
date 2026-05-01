@@ -17,7 +17,7 @@ FitForm gives athletes instant, private coaching feedback on two movements:
 | **Gym Coach** | Squat | Depth, trunk lean, knee tracking, hip balance |
 | **Shot Coach** | Basketball jump shot | Elbow alignment, release angle, knee load, landing |
 
-The camera runs MoveNet Lightning through the Hexagon NPU at ~30fps, giving per-frame form scores and coaching cues with no perceptible delay. After each set, a summary shows per-rep scores and top corrections. Every session saves a video + keypoint JSON — replay any session with the skeleton overlay synced to the recording.
+The camera runs Google's MoveNet Lightning through the Hexagon NPU at ~30fps, giving per-frame form scores and coaching cues with no perceptible delay. After each set, a summary shows per-rep scores and top corrections. Every session saves a video + keypoint JSON — replay any session with the skeleton overlay synced to the recording.
 
 ---
 
@@ -97,7 +97,7 @@ The key architectural decision enabling this is that `PoseEstimator` is an inter
 
 ### 1. INT8 Quantized Model
 
-The recommended model download is the **INT8 quantized** MoveNet Lightning:
+The recommended model download is the **INT8 quantized** MoveNet Lightning, published by Google Research on TensorFlow Hub:
 
 | Property | float32 | INT8 (used) |
 |---|---|---|
@@ -189,7 +189,7 @@ FitForm/LiteRT  [NPU/NNAPI] frame=30  last=6ms  avg=7ms
 FitForm/LiteRT  [NPU/NNAPI] frame=60  last=5ms  avg=6ms
 ```
 
-> **Future optimization:** Export MoveNet via [Qualcomm AI Hub](https://aihub.qualcomm.com) for a QNN-compiled model targeting the Hexagon architecture directly, bypassing the NNAPI abstraction layer for additional latency and efficiency gains.
+> **Future optimization:** MoveNet is a Google Research model originally published on TensorFlow Hub. [Qualcomm AI Hub](https://aihub.qualcomm.com) hosts a Qualcomm-optimized build of the same architecture — shipping that QNN-compiled variant would target the Hexagon hardware directly, bypassing the NNAPI abstraction layer for additional latency and efficiency gains.
 
 ---
 
@@ -201,7 +201,7 @@ The interesting parts of building FitForm weren't the happy paths. Three concret
 
 ### 1. Picking the right pose model
 
-We evaluated several pose estimators (Mediapipe BlazePose, MoveNet Thunder, MoveNet Lightning) against two non-negotiable constraints: sustain 30fps on Snapdragon and expose enough joints for both squat and shot biomechanics. Thunder was more accurate but missed the latency budget on edge cases. **Lightning + INT8** hit ~5–8ms per frame on the Hexagon NPU and surfaced all 17 COCO keypoints we needed — accuracy we could afford, latency we couldn't compromise.
+We evaluated several pose estimators (Mediapipe BlazePose, Google's MoveNet Thunder, and Google's MoveNet Lightning) against two non-negotiable constraints: sustain 30fps on Snapdragon and expose enough joints for both squat and shot biomechanics. Thunder was more accurate but missed the latency budget on edge cases. **Lightning + INT8** hit ~5–8ms per frame on the Hexagon NPU and surfaced all 17 COCO keypoints we needed — accuracy we could afford, latency we couldn't compromise.
 
 ### 2. Tuning thresholds, not model weights
 
@@ -435,7 +435,7 @@ MIT
 | Library | Version | Role |
 |---|---|---|
 | [Google LiteRT](https://github.com/google-ai-edge/LiteRT) | 1.0.1 | On-device ML inference (NNAPI delegate) |
-| [MoveNet Lightning](https://tfhub.dev/google/movenet/singlepose/lightning/4) | INT8 | Pose estimation model |
+| [MoveNet Lightning](https://tfhub.dev/google/movenet/singlepose/lightning/4) | INT8 | Pose estimation model (Google Research, 2021) |
 | [CameraX](https://developer.android.com/training/camerax) | 1.3.4 | Camera pipeline (Preview + Analysis + Video) |
 | [Jetpack Compose](https://developer.android.com/jetpack/compose) | BOM 2024.09 | UI + overlay rendering |
 | [ExoPlayer / Media3](https://developer.android.com/media/media3) | 1.4.1 | Replay video playback |
